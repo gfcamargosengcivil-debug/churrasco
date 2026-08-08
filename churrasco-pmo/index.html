@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1B1F27">
+<title>🍖 Projeto Churrasco da Turma — PMO</title>
+<meta name="description" content="Portal do Churrasco: PMO, dashboard, cronograma, financeiro, riscos e comunicação da turma. Um projeto gerenciado como projeto.">
+<meta property="og:title" content="🍖 Projeto Churrasco da Turma">
+<meta property="og:description" content="Um projeto gerenciado como projeto. Confirme sua presença, veja o cronograma e o financeiro.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍖</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topo">
+  <div class="topo-in">
+    <div class="marca">
+      <span class="fogo">🍖</span>
+      <div>
+        <h1>PROJETO CHURRASCO DA TURMA</h1>
+        <p class="sub">"Um projeto gerenciado como projeto."</p>
+      </div>
+      <div class="topo-acoes">
+        <button class="btn btn-ghost btn-sm" id="btnLinkTopo">🔗 Copiar link</button>
+        <button class="btn btn-zap btn-sm" id="btnZapTopo">📲 Compartilhar no WhatsApp</button>
+        <button class="btn btn-sm" id="btnEdit">✏️ Modo edição</button>
+      </div>
+    </div>
+    <div class="resumo-topo" id="resumoTopo"></div>
+    <nav class="abas" id="abas"></nav>
+  </div>
+</header>
+
+<main>
+  <div id="view"></div>
+  <div class="rodape">
+    🍖 <b>Portal do Churrasco</b> — PMO da turma · Funciona sem internet, sem login e sem instalação.<br>
+    Os dados ficam salvos no seu navegador. Exporte um backup na aba ⚙️ Compartilhar.
+  </div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
