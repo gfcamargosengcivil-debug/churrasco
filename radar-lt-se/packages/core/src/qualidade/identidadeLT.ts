@@ -53,7 +53,12 @@ export function identidadesDoNome(nome: string): IdentidadeLT[] {
     .replace(/±\s*/g, '')
     .replace(/\([^)]*\)/g, ' ')
     // Separador de itens em listas oficiais: hífen colado ao texto anterior ("..., CS- LT 500 kV ...").
-    .replace(/(\S)-\s+(?=(?:lt|se|secc|seccionamento)\b)/g, '$1; ');
+    .replace(/(\S)-\s+(?=(?:lt|se|secc|seccionamento|trechos?)\b)/g, '$1; ')
+    // "Trechos de LT 500 kV entre a SE A e o seccionamento da LT B - C" = seccionamento da LT B - C na SE A.
+    .replace(
+      /\btrechos?\s+d[ae]\s+lts?\s+((?:\d+(?:[.,]\d+)?\s*kv\s+)?)entre\s+(?:a\s+|o\s+)?(?:se\s+)?([a-z0-9 ]+?)\s+e\s+o\s+seccionamento\s+da\s+lt\s+(?:\d+(?:[.,]\d+)?\s*kv\s+)?([^;|]+?)(?=[;|]|$)/g,
+      (_m, kv: string, se: string, lt: string) => `secc lt ${kv}${lt} na se ${se}`,
+    );
   // "SE X e seccionamento(s) da(s) LT(s) A - B": a SE do seccionamento vem antes.
   const seAntes = /\bse\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+)*\s*kv\s+)?([a-z0-9 ]+?)\s+e\s+(?:o\s+)?secc/.exec(bruto)?.[1];
   const out: IdentidadeLT[] = [];
@@ -69,7 +74,13 @@ export function identidadesDoNome(nome: string): IdentidadeLT[] {
       .split(/,|\bc\s*-?\s*\d|\bna\s+se\b|\bem\s+se\b|\bcom\s+\d|\b(?:cs|cd)\b|\be\s+(?:se|lt|bipolos?|subesta\w*|instala\w*)\b/)[0]
       .replace(/\d+(?:[.,]\d+)?\s*kv\b/g, ' ')
       .trim();
-    const partes = ext.split(/\s+-\s+|\s*\/\s*|-(?=[a-z])/).map(normalizarExtremidade).filter((p) => p.length >= 3);
+    // Segmento curto sem número após hífen colado é código da própria SE ("Centro-CTR"), não outra extremidade.
+    const segs: string[] = [];
+    for (const seg of ext.split(/\s+-\s+|\s*\/\s*|-(?=[a-z])/)) {
+      if (segs.length && /^[a-z]{1,3}$/.test(seg.trim())) segs[segs.length - 1] += ` ${seg.trim()}`;
+      else segs.push(seg);
+    }
+    const partes = segs.map(normalizarExtremidade).filter((p) => p.length >= 3);
     if (partes.length < 2) continue;
     for (let i = 0; i + 1 < partes.length; i++) {
       const [a, b] = [partes[i], partes[i + 1]].sort();
@@ -90,14 +101,55 @@ export function identidadeDoTrecho(t: { nome: string; tensaoKv?: number; origem?
 }
 
 const numeros = (x: string) => (x.match(/\d+/g) ?? []).join(',');
-/** Mesma SE: nomes canônicos iguais; tolerância de grafia só quando a numeração coincide ("Juazeiro 2" ≠ "Juazeiro 3"). */
-const mesmaExtremidade = (x: string, y: string) => x === y || (numeros(x) === numeros(y) && similaridadeBigramas(x, y) >= 0.92);
+/**
+ * Mesmos nomes por palavra, aceitando abreviação ("p dutra" = "presidente dutra", "sta" = "santa") e
+ * sufixo curto de código ("centro ctr" = "centro").
+ */
+function mesmasPalavras(x: string, y: string): boolean {
+  const [a, b] = [x.split(' '), y.split(' ')].sort((u, v) => u.length - v.length);
+  const abrevia = (u: string, v: string) => u === v || (!/\d/.test(u + v) && Math.min(u.length, v.length) <= 3 && (u.startsWith(v) || v.startsWith(u)));
+  if (!a.every((t, i) => abrevia(t, b[i]))) return false;
+  return b.slice(a.length).every((t) => t.length <= 3 && !/\d/.test(t));
+}
+/**
+ * Mesma SE: nomes canônicos iguais ou abreviados; tolerância de grafia só quando a numeração coincide
+ * ("Juazeiro 2" ≠ "Juazeiro 3").
+ */
+export const mesmaExtremidade = (x: string, y: string) =>
+  x === y || (numeros(x) === numeros(y) && (mesmasPalavras(x, y) || similaridadeBigramas(x, y) >= 0.92));
 
 export type ComparacaoLT = 'mesma' | 'mesmas_extremidades' | 'circuito_diferente' | 'sem_relacao';
 
 /** Igualdade exata (inclui o conjunto de circuitos): usada para atribuir valores de um registro a outro. */
 export function identidadesIguais(r: IdentidadeLT, p: IdentidadeLT): boolean {
   return compararIdentidades(r, p) === 'mesma' && r.circuitos.join(',') === p.circuitos.join(',');
+}
+
+/**
+ * Compatível: idêntica, ou mesmas extremidades e mesma tensão (conhecida dos dois lados) com o circuito
+ * informado em apenas um dos lados.
+ */
+export function identidadesCompativeis(r: IdentidadeLT, p: IdentidadeLT): boolean {
+  const c = compararIdentidades(r, p);
+  if (c === 'mesma') return true;
+  if (c !== 'mesmas_extremidades' || r.kv === undefined || p.kv === undefined) return false;
+  if (r.tipo === 'secc' && !(r.se && p.se)) return false;
+  return !r.circuitos.length !== !p.circuitos.length;
+}
+
+/**
+ * Subestações que são o objeto do empreendimento (nome começa por "SE X" ou lista "e SE X"/"; SE X"),
+ * não as citadas como local ("seccionamento ... na SE X") nem reforços em SE existente.
+ */
+export function subestacoesDoNome(nome: string): string[] {
+  const t = normalizarTexto(nome).replace(/[–—]/g, '-');
+  if (/^(reforco|melhoria|ampliacao|adequacao|substituicao)\b/.test(t)) return [];
+  const out = new Set<string>();
+  for (const m of t.matchAll(/(?:^|[;,:]\s*|\be\s+|\s-\s+)ses?\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*\s*kv\s+)?([a-z][a-z0-9 ]*?)(?=\s*(?:[,;:(.]|\s-\s|-|\s(?:e|com|para|na|no|em)\s|$))/g)) {
+    const n = normalizarExtremidade(m[1]);
+    if (n.length >= 3 && !/^(nova|novas|existente)$/.test(n)) out.add(n);
+  }
+  return [...out];
 }
 
 export function compararIdentidades(r: IdentidadeLT, p: IdentidadeLT): ComparacaoLT {

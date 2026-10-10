@@ -186,17 +186,22 @@ export function registroSiget(
   const trechos: NonNullable<RegistroNormalizado['trechosLT']> = [];
   const detalheLT: string[] = [];
   let extensaoNova = 0;
-  const vistos = new Set<string>();
+  // Um módulo de LT pode aparecer em várias linhas (uma por obra): agrupa por IdeMdl.
+  const porModulo = new Map<string, Linha[]>();
   for (const { linha } of modulos.filter((m) => texto(m.linha.SigTipMdl) === 'LT')) {
-    const ideMdl = texto(linha.IdeMdl);
-    if (vistos.has(ideMdl)) continue;
-    vistos.add(ideMdl);
+    const k = texto(linha.IdeMdl);
+    porModulo.set(k, [...(porModulo.get(k) ?? []), linha]);
+  }
+  // Polos de um mesmo bipolo (CC) compartilham as torres: a extensão conta uma vez.
+  const extensaoCC = new Set<string>();
+  for (const [ideMdl, linhasMdl] of porModulo) {
+    const linha = linhasMdl.find((l) => texto(l.DscTipObr) === 'Instalação') ?? linhasMdl[0];
     const lt = ctx.lts.get(ideMdl);
     const nomeMdl = texto(linha.NomMdl) || texto(lt?.NomLinTms);
     const kv = numero(lt?.NumTensaoBaseLinhaTransm) ?? extrairTensoesKv(nomeMdl)[0];
     if (!kv) continue;
     tensoes.add(kv);
-    const dscObr = texto(linha.DscObr);
+    const dscObr = [...new Set(linhasMdl.map((l) => texto(l.DscObr)))].join(' | ');
     const origem = texto(lt?.NomSubestacaoOrigem);
     const destino = texto(lt?.NomSubestacaoDestino);
     // Circuitos resultantes de seccionamento: o módulo tem a extensão da linha resultante (quase toda
@@ -207,15 +212,20 @@ export function registroSiget(
     let km: number | undefined;
     if (texto(linha.DscTipObr) === 'Instalação' && !resultanteSecc) km = kmModulo;
     else if (resultanteSecc && kmObra && /constru|implanta|trecho/i.test(dscObr)) km = numero(kmObra);
+    const cc = /\bcc\b|±|bipolo|hvdc|kvcc/i.test(nomeMdl) || kv === 600 || kv === 800;
+    const chaveCC = `${normalizarTexto(origem)}|${normalizarTexto(destino)}|${km}`;
+    const outroPolo = !!km && cc && extensaoCC.has(chaveCC);
+    if (km && cc) extensaoCC.add(chaveCC);
+    if (outroPolo) km = undefined;
     if (km) extensaoNova += km;
-    detalheLT.push(`${nomeMdl}: NumEtnLinTms=${texto(lt?.NumEtnLinTms) || '∅'}${km ? ` (obra: ${km} km)` : ' (não atribuída à obra)'}`);
+    detalheLT.push(`${nomeMdl}: NumEtnLinTms=${texto(lt?.NumEtnLinTms) || '∅'}${km ? ` (obra: ${km} km)` : outroPolo ? ' (polo do mesmo bipolo: extensão já contada)' : ' (não atribuída à obra)'}`);
     for (const uf of [texto(lt?.SigUFSubestacaoOrigem), texto(lt?.SigUFSubestacaoDestino)]) if (ehUf(uf)) ufs.add(uf);
     trechos.push({
       // Nome do módulo traz o circuito ("C-1"): distingue circuitos da mesma LT.
       nome: nomeMdl,
       tensaoKv: kv,
       // Corrente pelo próprio módulo: empreendimento de bipolo também tem circuitos CA.
-      corrente: /\bcc\b|±|bipolo|hvdc|kvcc/i.test(nomeMdl) || kv === 600 || kv === 800 ? 'CC' : 'CA',
+      corrente: cc ? 'CC' : 'CA',
       extensaoKm: km,
       circuitos: numero(lt?.NumCcuLinTms) ? Math.round(numero(lt?.NumCcuLinTms)!) : undefined,
       origem: origem || undefined,

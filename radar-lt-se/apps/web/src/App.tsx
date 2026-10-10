@@ -43,9 +43,9 @@ function AvisoPublicacao({ p }: { p: Publicacao }) {
   const parciais = p.coletas.filter((c) => c.status === 'parcial');
   const comDados = p.coletas.filter((c) => c.status !== 'erro');
   return (
-    <div className="aviso info" role="note">
-      <strong>Versão publicada — somente consulta.</strong>
-      <div>
+    <div className="aviso info" role="note" style={{ display: 'block' }}>
+      <strong>Versão publicada — somente consulta.</strong>{' '}
+      <span>
         {p.demo ? <>{p.empreendimentos} empreendimentos de DEMONSTRAÇÃO (fictícios), gerados em {dataHoraBR(p.geradoEm)}.</> : (
           <>
             {p.empreendimentos} empreendimentos de fontes públicas
@@ -58,7 +58,7 @@ function AvisoPublicacao({ p }: { p: Publicacao }) {
         {p.portfolioConfigurado === false && <> A prioridade usa um perfil genérico (portfólio da empresa não configurado; critério geográfico neutro).</>}
         {!!p.possiveisDuplicidades && <> {p.possiveisDuplicidades} par(es) de registros semelhantes podem ser o mesmo empreendimento (<a href="#/qualidade">Qualidade → Possíveis duplicidades</a>); totais podem estar superestimados.</>}
         {' '}Datas calculadas são estimativas da plataforma, não compromissos dos empreendedores.
-      </div>
+      </span>
     </div>
   );
 }

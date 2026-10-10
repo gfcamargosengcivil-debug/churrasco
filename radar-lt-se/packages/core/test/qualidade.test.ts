@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  criarEmpreendimentoDeRegistro, decidirCorrespondencia, mesclarRegistro, pontuarCorrespondencia, resolverConflito, type Organizacao,
+  compararIdentidades, criarEmpreendimentoDeRegistro, decidirCorrespondencia, identidadeDoTrecho, identidadesDoNome, mesclarRegistro,
+  pontuarCorrespondencia, resolverConflito, subestacoesDoNome, type Organizacao,
   type RegistroNormalizado,
 } from '../src/index.js';
 import { fonte, marco, projeto } from './fabrica.js';
@@ -82,6 +83,25 @@ describe('deduplicação', () => {
     const c = pontuarCorrespondencia(registro({ nome: 'LT 230 kV Zebu II - Zebu III, C1', tensoesKv: [230], ufs: ['AL'] }), multi, orgs);
     expect(c.motivos.join(' ')).not.toContain('Tensões diferentes');
     expect(c.pontuacao).toBeGreaterThanOrEqual(0.86);
+  });
+
+  it('identidade com abreviação, código de SE e "trechos entre a SE X e o seccionamento"', () => {
+    expect(identidadesDoNome('LT 345 kV Miguel Reale - Centro-CTR, C1 e C2 (CD)')).toEqual([expect.objectContaining({ a: 'centro ctr', b: 'miguel reale' })]);
+    expect(identidadesDoNome('SE 440/138 kV Estância- Trechos de LT 440 kV entre a SE Estância e o seccionamento da LT Bauru - Salto, C1')).toEqual([
+      expect.objectContaining({ tipo: 'secc', a: 'bauru', b: 'salto', se: 'estancia', circuitos: [1] }),
+    ]);
+    const [lote] = identidadesDoNome('LT 500 kV Presidente Dutra – Graça Aranha C3, CS');
+    const [modulo] = identidadeDoTrecho({ nome: 'LT 500 kV GRACA ARANHA /P.DUTRA C-3 MA', tensaoKv: 500, origem: 'GRACA ARANHA', destino: 'P.DUTRA' });
+    expect(compararIdentidades(lote, modulo)).toBe('mesma');
+    expect(subestacoesDoNome('Leilão 002/2024 · Lote 3: SE 440/138 kV Estância')).toEqual(['estancia']);
+    expect(subestacoesDoNome('Seccionamento da LT 138 kV Bariri – Barra Bonita C1 na SE Estância')).toEqual([]);
+  });
+
+  it('SEs objeto distintas separam; mesma SE objeto liga registro só de SE', () => {
+    const se3 = projeto({ nomeOficial: 'SE Coxilha Negra 3', localizacao: { ufs: ['RS'], municipios: [] } });
+    expect(pontuarCorrespondencia(registro({ nome: 'SE Coxilha Negra 2', ufs: ['RS'] }), se3, orgs).pontuacao).toBeLessThan(0.55);
+    const est = projeto({ nomeOficial: 'SE 440/138 kV Estância e seccionamento da LT 440 kV Bauru - Salto, C1', localizacao: { ufs: ['SP'], municipios: [] } });
+    expect(pontuarCorrespondencia(registro({ nome: 'Leilão 002/2024 · Lote 3: SE 440/138 kV Estância', ufs: ['SP'], tensoesKv: [440, 138] }), est, orgs).pontuacao).toBeGreaterThanOrEqual(0.86);
   });
 
   it('nome + UF + tensão + empreendedor vinculam automaticamente', () => {

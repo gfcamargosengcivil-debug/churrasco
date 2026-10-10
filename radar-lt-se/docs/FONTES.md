@@ -18,14 +18,14 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
 | Fonte | Classe | Método | Frequência | Status da integração |
 |---|---|---|---|---|
 | ANEEL — Portal de Dados Abertos (CKAN) | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
-| ANEEL — SIGET (Sistema de Gestão da Transmissão) via Dados Abertos | A | API CKAN (dados abertos) | Diária | Implementado — não validado contra o endpoint real |
+| ANEEL — SIGET (Sistema de Gestão da Transmissão) via Dados Abertos | A | API CKAN (dados abertos) | Diária | Implementado e validado |
 | ANEEL — SIGA (empreendimentos de geração) via Dados Abertos | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
-| ANEEL — Resultado de leilões de transmissão (lotes) via Dados Abertos | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
+| ANEEL — Resultado de leilões de transmissão (lotes) via Dados Abertos | A | API CKAN (dados abertos) | Mensal | Implementado e validado |
 | ANEEL — Resoluções Autorizativas (reforços e melhorias) | A | Documento PDF | Semanal | Adaptador preparado (requer configuração/credencial) |
 | ANEEL — Relatórios de acompanhamento/fiscalização de empreendimentos de transmissão | A | Download de arquivo (CSV/XLSX) | Mensal | Importação manual |
 | EPE — Plano Decenal de Expansão de Energia (PDE) | A | Documento PDF | Anual | Adaptador preparado (requer configuração/credencial) |
 | EPE — Programa de Expansão da Transmissão / Plano de Expansão de Longo Prazo (PET/PELP) | A | Download de arquivo (CSV/XLSX) | Anual | Importação manual |
-| EPE — WebMap: LT e SE da expansão planejada (ArcGIS REST) | A | API ArcGIS REST | Mensal | Implementado — não validado contra o endpoint real |
+| EPE — WebMap: LT e SE da expansão planejada (ArcGIS REST) | A | API ArcGIS REST | Mensal | Implementado e validado |
 | ONS — Portal de Dados Abertos (CKAN) | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
 | ONS — Plano de Ampliações e Reforços / Plano da Operação Elétrica (PAR/PEL) | A | Documento PDF | Anual | Adaptador preparado (requer configuração/credencial) |
 | MME — Plano de Outorgas de Transmissão (POTEE) e diretrizes | A | Download de arquivo (CSV/XLSX) | Eventual (por publicação) | Importação manual |
@@ -62,8 +62,9 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
 - **Portal:** https://dadosabertos.aneel.gov.br/dataset/sistema-de-gestao-da-transmissao-siget
 - **Método de acesso:** API CKAN (dados abertos) (adaptador `aneel_siget`)
 - **Frequência esperada:** Diária
-- **Status:** Implementado — não validado contra o endpoint real
+- **Status:** Implementado e validado
 - **Limitações conhecidas:**
+  - Validado contra o serviço real em 10/10/2026 (GitHub Actions): 4 recursos do datastore resolvidos pelo nome, 18.352 módulos lidos, 976 empreendimentos (carga de 08/10/2026).
   - Cobre empreendimentos já outorgados (contrato de concessão ou resolução autorizativa) e reforços planejados cadastrados; não informa se a obra já foi contratada nem o estágio físico (LI, início de obras).
   - Datas de previsão são informadas mensalmente pelas transmissoras (responsabilidade das concessionárias, segundo o dicionário de dados da ANEEL).
   - Não traz coordenadas nem valor de investimento por empreendimento (VlrHisRct é receita do contrato, não investimento): localização e potencial dependem de outras fontes ou da referência paramétrica.
@@ -87,8 +88,9 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
 - **Portal:** https://dadosabertos.aneel.gov.br/dataset/resultado-de-leiloes
 - **Método de acesso:** API CKAN (dados abertos) (adaptador `aneel_leiloes_transmissao`)
 - **Frequência esperada:** Mensal
-- **Status:** Implementado — não validado contra o endpoint real
+- **Status:** Implementado e validado
 - **Limitações conhecidas:**
+  - Validado contra o serviço real em 10/10/2026 (GitHub Actions): 488 lotes no conjunto, 53 desde 2021 (último leilão registrado: 27/09/2024).
   - O conjunto traz lotes já leiloados (resultado); editais e lotes de leilões futuros continuam por importação de planilha/documento.
   - A data de assinatura do contrato não consta do conjunto: a energização é estimada (leilão + premissa + prazo do edital) e rotulada como estimativa.
   - Coleta lotes dos últimos 5 anos (configurável); lotes antigos já estão, em geral, em operação.
@@ -142,11 +144,13 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
 - **Portal:** https://gisepeprd2.epe.gov.br/arcgis/rest/services/SMA/WMS_Webmap_EPE/MapServer
 - **Método de acesso:** API ArcGIS REST (adaptador `epe_webmap`)
 - **Frequência esperada:** Mensal
-- **Status:** Implementado — não validado contra o endpoint real
+- **Status:** Implementado e validado
 - **Limitações conhecidas:**
+  - Validado contra o serviço real em 10/10/2026 (GitHub Actions): camadas 10 (444 feições de LT), 9 (181 SEs planejadas), 20 (SEs existentes) e 23 (UFs) consultadas.
   - Geometrias de planejamento são indicativas: traçados registrados como "aproximado_digitalizado" e SEs com localização "aproximada", nunca como traçado executivo.
-  - O ano previsto de entrada em operação tem precisão anual (registrado como 31/12); parte das feições não informa ano.
-  - Itens planejados podem já ter sido leiloados/autorizados: a deduplicação os associa aos registros da ANEEL quando os nomes coincidem.
+  - O ano previsto de entrada em operação tem precisão anual: vira energização estimada em 01/07 do ano (rotulada como estimativa, não é data divulgada); parte das feições não informa ano.
+  - Itens planejados podem já ter sido leiloados/autorizados: a deduplicação os associa aos registros da ANEEL pela identidade da LT (extremidades, tensão e circuito) e só complementa o cadastro existente.
+  - A camada não informa retirada de itens do plano: empreendimentos conhecidos só pela EPE não são encerrados automaticamente.
   - O serviço da EPE já teve indisponibilidades; falhas de coleta ficam registradas e os dados anteriores são mantidos.
 
 ### ONS — Portal de Dados Abertos (CKAN)

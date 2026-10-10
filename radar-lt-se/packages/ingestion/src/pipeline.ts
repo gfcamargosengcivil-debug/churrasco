@@ -4,7 +4,7 @@
  * a persistência é feita pela "porta" implementada na API.
  */
 import {
-  compararIdentidades, identidadeDoTrecho, identidadesContidas, identidadesDoEmpreendimento, identidadesDoNome, identidadesDoRegistro, identidadesIguais,
+  compararIdentidades, identidadeDoTrecho, identidadesCompativeis, identidadesContidas, identidadesDoEmpreendimento, identidadesDoNome, identidadesDoRegistro, identidadesIguais,
   pontuarCorrespondencia,
   CONFIGURACAO_PADRAO, RegistroNormalizadoSchema, criarEmpreendimentoDeRegistro, decidirCorrespondencia, detectarMudancas,
   mesclarRegistro, novoId, resumoRegistro, type Coleta, type ConfiguracaoPlataforma, type ContextoMescla, type Empreendimento, type EventoMudanca,
@@ -81,7 +81,8 @@ export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento
     nomesAlternativos: exato ? r.nomesAlternativos : undefined,
     identificadores: opcoes.parcial ? undefined : r.identificadores,
     organizacoes: r.organizacoes,
-    ufs: parte || !p.localizacao.ufs.length ? r.ufs : undefined,
+    // UFs do registro só quando é a mesma instalação (a descrição de um lote pode não listar todos os itens).
+    ufs: exato || !p.localizacao.ufs.length ? r.ufs : undefined,
     ponto: parte && !p.localizacao.ponto ? r.ponto : undefined,
     trechosLT: trechos.length ? trechos : undefined,
     marcos: (r.marcos ?? []).filter((m) => !tiposComMarco.has(m.tipo) && !(temEnergizacao && ['energizacao', 'operacao_comercial', 'prazo_contratual_energizacao'].includes(m.tipo))),
@@ -94,18 +95,25 @@ export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento
 }
 
 /**
- * Empreendimentos que são partes de um registro que abrange várias instalações (todas as LTs do
- * empreendimento estão no registro, mas não o contrário) e cuja correspondência é plausível.
+ * Empreendimentos que são partes de um registro que abrange várias instalações (ex.: lote com várias
+ * LTs): compartilham ao menos uma LT com o registro (uma LT pertence a um só empreendimento) e têm
+ * correspondência plausível. Vazio quando algum empreendimento contém o registro inteiro (caso comum
+ * de correspondência, decidido pela pontuação).
  */
 export function partesDoRegistro(r: RegistroNormalizado, projetos: Empreendimento[], organizacoes: Map<string, Organizacao>, cfg: ConfiguracaoPlataforma['dedup']): Empreendimento[] {
   const idsR = identidadesDoRegistro(r);
-  if (idsR.length < 2) return [];
-  return projetos.filter((p) => {
+  if (!idsR.length) return [];
+  const partes = projetos.filter((p) => {
     if (p.statusGeral === 'cancelado') return false;
     const idsP = identidadesDoEmpreendimento(p);
-    if (!identidadesContidas(idsP, idsR) || identidadesContidas(idsR, idsP)) return false;
-    return pontuarCorrespondencia(r, p, organizacoes, cfg).pontuacao >= cfg.limiarAutomatico;
+    if (!idsP.some((b) => idsR.some((a) => identidadesCompativeis(a, b)))) return false;
+    return pontuarCorrespondencia(r, p, organizacoes, cfg).pontuacao >= cfg.limiarRevisao;
   });
+  const contemTudo = partes.some((p) => {
+    const idsP = identidadesDoEmpreendimento(p);
+    return idsR.every((a) => idsP.some((b) => identidadesCompativeis(a, b)));
+  });
+  return contemTudo ? [] : partes;
 }
 
 export async function processarRegistros(registros: RegistroNormalizado[], op: OpcoesProcessamento): Promise<{ coleta: Coleta; eventos: EventoMudanca[]; empreendimentosAfetados: string[] }> {
@@ -169,9 +177,11 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
         vinculosMultiplos++;
         continue;
       }
-      const decisao = op.vincularA
+      let decisao: ReturnType<typeof decidirCorrespondencia> = op.vincularA
         ? { acao: 'vincular' as const, empreendimentoId: op.vincularA, candidatos: [] }
         : decidirCorrespondencia(r, projetos, orgMap, cfg.dedup);
+      // Uma única parte já acompanhada: o registro complementar se liga a ela em vez de virar cadastro novo.
+      if (partes.length === 1 && decisao.acao !== 'vincular') decisao = { acao: 'vincular', empreendimentoId: partes[0].id, candidatos: decisao.candidatos };
       if (decisao.acao === 'revisar' && op.semRevisaoManual) {
         incertosSemRevisao++;
       } else if (decisao.acao === 'revisar') {

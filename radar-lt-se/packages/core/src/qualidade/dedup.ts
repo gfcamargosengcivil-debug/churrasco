@@ -8,7 +8,9 @@ import { distanciaKm } from '../geo/index.js';
 import { normalizarNomeOrganizacao, normalizarTexto, similaridadeNomes } from '../normalizacao/index.js';
 import { extensaoTotalKm, pontoRepresentativo, tensoesKv } from '../projetos/derivados.js';
 import type { Empreendimento, Identificador, Organizacao } from '../tipos.js';
-import { compararIdentidades, identidadeDoTrecho, identidadesDoNome, type IdentidadeLT } from './identidadeLT.js';
+import {
+  compararIdentidades, identidadeDoTrecho, identidadesCompativeis, identidadesDoNome, mesmaExtremidade, subestacoesDoNome, type IdentidadeLT,
+} from './identidadeLT.js';
 import type { RegistroNormalizado } from './registro.js';
 
 export interface Correspondencia {
@@ -70,6 +72,27 @@ export function identidadesDoRegistro(r: RegistroNormalizado): IdentidadeLT[] {
   }
   return ids;
 }
+
+const cacheSesProj = new WeakMap<Empreendimento, { assinatura: string; ses: string[] }>();
+const cacheSesReg = new WeakMap<RegistroNormalizado, string[]>();
+/** Subestações objeto do empreendimento (pelo nome oficial e apelidos). */
+function sesDoEmpreendimento(p: Empreendimento): string[] {
+  const assinatura = `${p.nomeOficial}|${p.nomesAlternativos.length}`;
+  const c = cacheSesProj.get(p);
+  if (c?.assinatura === assinatura) return c.ses;
+  const ses = [...new Set([p.nomeOficial, ...p.nomesAlternativos].flatMap(subestacoesDoNome))];
+  cacheSesProj.set(p, { assinatura, ses });
+  return ses;
+}
+function sesDoRegistro(r: RegistroNormalizado): string[] {
+  let ses = cacheSesReg.get(r);
+  if (!ses) {
+    ses = [...new Set([r.nome, ...(r.nomesAlternativos ?? [])].flatMap(subestacoesDoNome))];
+    cacheSesReg.set(r, ses);
+  }
+  return ses;
+}
+const sesContidas = (xs: string[], ys: string[]) => xs.length > 0 && xs.every((x) => ys.some((y) => mesmaExtremidade(x, y)));
 
 /** Todas as identidades de xs têm correspondente idêntico (extremidades, tensão e circuito) em ys. */
 export const identidadesContidas = (xs: IdentidadeLT[], ys: IdentidadeLT[]) =>
@@ -137,9 +160,15 @@ export function pontuarCorrespondencia(
   // Contido em qualquer sentido: o registro é parte do empreendimento ou o empreendimento é parte do
   // registro (ex.: lote de leilão que reúne o empreendimento e outras instalações).
   const todasIguais = identidadesContidas(ltsReg, ltsProj) || identidadesContidas(ltsProj, ltsReg);
+  // Contidas sem o circuito em um dos lados ("Seccionamento da LT A - B na SE C" × "SECC LT A - B, C1, na SE C").
+  const compativeis = (xs: IdentidadeLT[], ys: IdentidadeLT[]) => xs.length > 0 && xs.every((a) => ys.some((b) => identidadesCompativeis(a, b)));
+  const todasCompativeis = !todasIguais && !circuitoDiferente && (compativeis(ltsReg, ltsProj) || compativeis(ltsProj, ltsReg));
   if (todasIguais) {
     score = Math.max(score + 0.25, 0.9);
     motivos.push('Mesma(s) LT(s): extremidades, tensão e circuito coincidentes.');
+  } else if (todasCompativeis) {
+    score += 0.2;
+    motivos.push('Mesma(s) LT(s): extremidades e tensão coincidentes (circuito não informado em um dos lados).');
   } else if (mesma) {
     score += 0.2;
     motivos.push('Ao menos uma LT idêntica (extremidades, tensão e circuito).');
@@ -153,6 +182,24 @@ export function pontuarCorrespondencia(
   } else if (ltsReg.length && ltsProj.length && !mesma && !extremidades && !circuitoDiferente) {
     score -= 0.15;
     motivos.push('LTs com extremidades distintas.');
+  }
+
+  // Subestações objeto do empreendimento ("SE X ..."), não as citadas como local de obra.
+  const sesReg = sesDoRegistro(r);
+  const sesProj = sesDoEmpreendimento(p);
+  let mesmaSE = false;
+  if (sesReg.length && sesProj.length) {
+    if (sesContidas(sesReg, sesProj) || sesContidas(sesProj, sesReg)) {
+      mesmaSE = true;
+      score += 0.2;
+      motivos.push('Mesma(s) SE(s) objeto do empreendimento.');
+    } else if (sesReg.some((x) => sesProj.some((y) => mesmaExtremidade(x, y)))) {
+      score += 0.1;
+      motivos.push('Ao menos uma SE objeto em comum.');
+    } else if (!ltsReg.length || !ltsProj.length) {
+      score -= 0.15;
+      motivos.push('Subestações distintas.');
+    }
   }
 
   // Tensão: a maior tensão de um lado presente no conjunto de tensões do outro (parte × todo,
@@ -226,7 +273,9 @@ export function pontuarCorrespondencia(
 
   // Identidade estrutural forte prevalece sobre diferenças de localização/extensão (geometrias e
   // extensões de planejamento são indicativas), mas não sobre tensão ou UF incompatíveis.
-  if (todasIguais && !circuitoDiferente && !motivos.some((m) => m.startsWith('Tensões diferentes') || m === 'Nenhuma UF em comum.')) {
+  // O mesmo vale para a SE objeto quando um dos lados não tem LT identificada (ex.: lote "SE X" × "SE X e seccionamento ...").
+  const forte = todasIguais || todasCompativeis || (mesmaSE && (!ltsReg.length || !ltsProj.length));
+  if (forte && !circuitoDiferente && !motivos.some((m) => m.startsWith('Tensões diferentes') || m === 'Nenhuma UF em comum.')) {
     score = Math.max(score, 0.86);
   }
   return { empreendimentoId: p.id, pontuacao: Math.max(0, Math.min(1, Math.round(score * 1000) / 1000)), motivos };
