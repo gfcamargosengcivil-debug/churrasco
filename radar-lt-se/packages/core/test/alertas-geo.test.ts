@@ -84,7 +84,7 @@ describe('geografia', () => {
     const p2 = projeto({ trechosLT: [{ ...LT, id: 't2', origem: 'Beta', destino: 'Gama', extensaoKm: 50 }] });
     const c = identificarCorredores([p1, p2]);
     expect(c).toHaveLength(1);
-    expect(c[0].subestacoes.sort()).toEqual(['alfa', 'beta', 'gama']);
+    expect(c[0].subestacoes.sort()).toEqual(['Gama', 'SE Alfa', 'SE Beta']);
     expect(c[0].extensaoKm).toBe(150);
   });
 });

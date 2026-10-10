@@ -96,11 +96,14 @@ export function identificarCorredores(projetos: Empreendimento[]): Corredor[] {
   };
   const unir = (a: string, b: string) => pai.set(achar(a), achar(b));
   const arestas: { a: string; b: string; proj: string; km: number; kv: number }[] = [];
+  const rotulo = new Map<string, string>();
   for (const p of projetos) {
     for (const t of p.trechosLT) {
       if (!t.origem || !t.destino) continue;
       const a = normalizarNomeEmpreendimento(t.origem).replace(/^se\s+/, '');
       const b = normalizarNomeEmpreendimento(t.destino).replace(/^se\s+/, '');
+      if (!rotulo.has(a)) rotulo.set(a, t.origem.trim());
+      if (!rotulo.has(b)) rotulo.set(b, t.destino.trim());
       unir(a, b);
       arestas.push({ a, b, proj: p.id, km: t.extensaoKm ?? 0, kv: t.tensaoKv });
     }
@@ -114,7 +117,7 @@ export function identificarCorredores(projetos: Empreendimento[]): Corredor[] {
     .filter((g) => g.length >= 2)
     .map((g, i) => ({
       id: `corredor-${i + 1}`,
-      subestacoes: [...new Set(g.flatMap((x) => [x.a, x.b]))],
+      subestacoes: [...new Set(g.flatMap((x) => [x.a, x.b]))].map((k) => rotulo.get(k) ?? k),
       empreendimentoIds: [...new Set(g.map((x) => x.proj))],
       trechos: g.length,
       extensaoKm: Math.round(g.reduce((s, x) => s + x.km, 0)),

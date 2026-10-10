@@ -245,8 +245,9 @@ export function calcularScore(p: Empreendimento, ctx: ContextoScore): ResultadoS
   }));
   const somaPesos = notas.reduce((s, n) => s + n.peso, 0) || 1;
   let indice = Math.round((notas.reduce((s, n) => s + (n.nota / 5) * n.peso, 0) / somaPesos) * 100);
-  const encerrado = ['cancelado', 'concluido'].includes(p.statusGeral);
-  if (fora || encerrado) indice = Math.min(indice, cfg.faixas.media - 1);
+  // Fora do escopo, encerrados e suspensos/adiados não entram nas faixas alta/média.
+  const inativo = ['cancelado', 'concluido', 'suspenso', 'adiado'].includes(p.statusGeral);
+  if (fora || inativo) indice = Math.min(indice, cfg.faixas.media - 1);
   const faixa: FaixaPrioridade = indice >= cfg.faixas.alta ? 'alta' : indice >= cfg.faixas.media ? 'media' : 'baixa';
   return {
     indice,

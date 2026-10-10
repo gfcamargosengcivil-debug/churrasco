@@ -38,6 +38,8 @@ export interface ParametrosPrevisao {
   contratoParaMobilizacao: TriploMeses;
   /** Licença de Instalação → mobilização (não se mobiliza antes da LI). */
   liParaMobilizacao: TriploMeses;
+  /** LI emitida sem RFQ identificada → prazo máximo esperado até a RFQ (teto nos cenários otimista/base). */
+  liParaRfq: TriploMeses;
   /** Mobilização → início efetivo das obras. */
   mobilizacaoParaObras: TriploMeses;
   /** Duração de obra de LT: fixo + proporcional à extensão. */
@@ -69,6 +71,7 @@ export const PARAMETROS_PREVISAO_PADRAO: ParametrosPrevisao = {
   rfqParaContrato: [2, 3, 5],
   contratoParaMobilizacao: [1, 2, 3],
   liParaMobilizacao: [0, 1, 3],
+  liParaRfq: [0, 2, 4],
   mobilizacaoParaObras: [1, 1, 2],
   duracaoObraLT: { fixo: [8, 10, 13], por100km: [2, 3, 4], minimo: 8, maximo: 36 },
   duracaoObraSE: {
@@ -234,7 +237,7 @@ export const CONFIG_SCORE_PADRAO: ConfigScore = {
     competitividade: 10,
     risco: 5,
   },
-  faixas: { alta: 65, media: 45 },
+  faixas: { alta: 75, media: 55 },
   limitesReceita: [20_000_000, 60_000_000, 150_000_000, 400_000_000],
 };
 

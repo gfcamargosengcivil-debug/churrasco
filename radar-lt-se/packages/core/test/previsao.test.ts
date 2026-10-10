@@ -136,6 +136,50 @@ describe('previsão — casos especiais', () => {
   });
 });
 
+describe('previsão — escopos e Licença de Instalação', () => {
+  it('cotação aberta em um escopo prevalece sobre janela vencida do outro', () => {
+    const p = projeto({
+      marcos: [marco('contrato_concessao_assinado', '2024-08-15')],
+      trechosLT: [LT200],
+      subestacoes: [SE_NOVA],
+      pacotes: [{ pacote: 'montagem_eletromecanica', escopo: 'LT', faseContratacao: 'rfq_rfp', dataEvento: '2025-05-20', evidenciaIds: [] }],
+    });
+    const prev = preverEmpreendimento(p, { hoje: '2025-06-01' });
+    expect(prev.cenarios.base.rfqPorEscopo.LT?.natureza).toBe('realizado');
+    expect(prev.cenarios.base.rfqPorEscopo.SE?.vencida).toBe(true);
+    expect(prev.necessidadeComercial.classe).toBe('imediata');
+    expect(prev.necessidadeComercial.descricao).toContain('LT');
+  });
+
+  it('LI emitida sem RFQ identificada antecipa a RFQ (teto de 2 meses no cenário base)', () => {
+    const p = projeto({
+      tipo: 'LT',
+      marcos: [marco('contrato_concessao_assinado', '2025-03-15'), marco('licenca_instalacao', '2025-05-01')],
+      trechosLT: [LT200],
+    });
+    const prev = preverEmpreendimento(p, { hoje: '2025-06-01' });
+    expect(prev.cenarios.base.datas.rfq?.data).toBe('2025-07-01');
+    expect(prev.cenarios.conservador.datas.rfq?.data).toBe('2026-01-15');
+  });
+
+  it('obra iniciada não marca como contratado o escopo com pacote ainda em negociação', () => {
+    const p = projeto({
+      marcos: [marco('contrato_concessao_assinado', '2024-01-15'), marco('contrato_execucao_assinado', '2025-03-01', 'realizado', { escopo: 'LT' })],
+      trechosLT: [LT200],
+      subestacoes: [SE_NOVA],
+      situacaoObra: 'mobilizacao',
+      pacotes: [
+        { pacote: 'montagem_eletromecanica', escopo: 'LT', faseContratacao: 'contratada', dataEvento: '2025-03-01', evidenciaIds: [] },
+        { pacote: 'construcao_civil', escopo: 'SE', faseContratacao: 'negociacao', dataEvento: '2025-05-01', evidenciaIds: [] },
+      ],
+    });
+    const prev = preverEmpreendimento(p, { hoje: '2025-06-01' });
+    expect(prev.cenarios.base.datas.contratacaoLT?.natureza).toBe('realizado');
+    expect(prev.cenarios.base.datas.contratacaoSE?.natureza).not.toBe('realizado');
+    expect(prev.necessidadeComercial.classe).toBe('imediata');
+  });
+});
+
 describe('confiança da previsão', () => {
   it('alta com fonte oficial recente, 3 fontes independentes e marcos consistentes', () => {
     const p = projeto({

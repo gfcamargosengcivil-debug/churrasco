@@ -46,6 +46,7 @@ const ROTULO_PARAMETRO: Partial<Record<keyof ParametrosPrevisao, string>> = {
   rfqParaContrato: 'RFQ/RFP → assinatura do contrato de execução',
   contratoParaMobilizacao: 'Contrato de execução → mobilização',
   liParaMobilizacao: 'Licença de Instalação → mobilização',
+  liParaRfq: 'LI emitida sem RFQ identificada → RFQ (prazo máximo)',
   mobilizacaoParaObras: 'Mobilização → início das obras',
   comissionamento: 'Comissionamento até energização',
   ajusteEnergizacaoDivulgada: 'Ajuste sobre energização divulgada',
@@ -159,8 +160,9 @@ function candidatosAncora(p: Empreendimento): CandidatoAncora[] {
   const outorga: TipoMarco[] = ['contrato_concessao_assinado', 'autorizacao_publicada'];
   return [
     { tipos: outorga, naturezas: ['realizado'], offsets: [], tipoAncora: 'outorga' },
-    { tipos: ['decisao_final_investimento'], naturezas: ['realizado'], offsets: [], tipoAncora: 'fid' },
+    // Privados: contratação do EPC/obra principal é posterior (mais avançada) à decisão de investimento.
     ...(privado ? [{ tipos: ['vencedor_definido'] as TipoMarco[], naturezas: ['realizado'] as Marco['natureza'][], offsets: [], tipoAncora: 'fid' as const }] : []),
+    { tipos: ['decisao_final_investimento'], naturezas: ['realizado'], offsets: [], tipoAncora: 'fid' },
     { tipos: ['parecer_acesso'], naturezas: ['realizado'], offsets: [], tipoAncora: 'acesso', somenteFluxos: ['conexao_geracao'] },
     { tipos: outorga, naturezas: ['previsto_oficial'], offsets: [], tipoAncora: 'outorga' },
     { tipos: ['decisao_final_investimento'], naturezas: ['previsto_oficial'], offsets: [], tipoAncora: 'fid' },
@@ -229,7 +231,11 @@ function prazoEnergizacao(ctx: Ctx, escopo?: EscopoObra): Marco | undefined {
 function dataContratoRealizado(ctx: Ctx, escopo: EscopoObra): DataPrevista | undefined {
   const { p } = ctx;
   const fase = faseContratacaoConstrucao(p, escopo);
-  const obraIniciada = ['mobilizacao', 'construcao', 'comissionamento', 'concluida'].includes(p.situacaoObra);
+  // Obra iniciada implica contratação, exceto quando há pacote deste escopo ainda em fase anterior.
+  const pacoteEscopoPendente = p.pacotes.some(
+    (x) => PACOTES_CONSTRUCAO.includes(x.pacote) && x.escopo === escopo && ORDEM_FASE_CONTRATACAO[x.faseContratacao] < ORDEM_FASE_CONTRATACAO.adjudicada,
+  );
+  const obraIniciada = ['mobilizacao', 'construcao', 'comissionamento', 'concluida'].includes(p.situacaoObra) && !pacoteEscopoPendente;
   if (ORDEM_FASE_CONTRATACAO[fase] < ORDEM_FASE_CONTRATACAO.adjudicada && !obraIniciada) return undefined;
   const m = marcosDoTipo(p, ['contrato_execucao_assinado'], ['realizado'], escopo)[0];
   if (m) return dataDeMarco(m, ctx, `Contrato de execução (${escopo})`);
@@ -295,12 +301,11 @@ function preverRfq(ctx: Ctx, escopo: EscopoObra, ancora: Ancora | undefined): Da
       natureza: baseDivulgada.natureza === 'heuristico' ? 'heuristico' : 'calculado_de_marco',
     };
   }
-  // Licença de Instalação emitida: a contratação tende a ocorrer até a mobilização pós-LI.
+  // Licença de Instalação emitida sem RFQ identificada: a contratação tende a ser iminente.
   const li = marcosDoTipo(p, ['licenca_instalacao'], ['realizado'], escopo)[0];
   let limiteLI: DataPrevista | undefined;
   if (li) {
-    const off = meses(ctx, 'liParaMobilizacao') - meses(ctx, 'contratoParaMobilizacao') - meses(ctx, 'rfqParaContrato');
-    limiteLI = derivar(dataDeMarco(li, ctx, 'LI'), off, 'LI emitida → mobilização, descontada a contratação', `${rotulo} (limite pela LI)`);
+    limiteLI = derivar(dataDeMarco(li, ctx, 'LI'), meses(ctx, 'liParaRfq'), ROTULO_PARAMETRO.liParaRfq!, `${rotulo} (limite pela LI)`);
   }
 
   if (!prevista) {
@@ -354,10 +359,12 @@ function preverCenario(p: Empreendimento, par: ParametrosPrevisao, hoje: string,
   if (temLT(p)) escopos.push('LT');
   if (temSE(p)) escopos.push('SE');
 
+  const rfqPorEscopo: CenarioPrevisao['rfqPorEscopo'] = {};
   const porEscopo = escopos.map((e) => {
     const rfqE = preverRfq(ctx, e, ancora);
     const contratoE = preverContrato(ctx, e, rfqE);
     if (contratoE) datas[e === 'LT' ? 'contratacaoLT' : 'contratacaoSE'] = contratoE;
+    if (rfqE) rfqPorEscopo[e] = rfqE;
     return { e, rfqE, contratoE };
   });
   // Janela de RFQ/contrato do empreendimento = escopos ainda não contratados (ou todos, se já contratados).
@@ -422,15 +429,14 @@ function preverCenario(p: Empreendimento, par: ParametrosPrevisao, hoje: string,
     }
   }
 
-  for (const k of EVENTOS_PREVISAO) {
-    const d = datas[k];
+  for (const d of [...EVENTOS_PREVISAO.map((k) => datas[k]), ...Object.values(rfqPorEscopo)]) {
     if (d && d.natureza !== 'realizado' && d.data < hoje) d.vencida = true;
   }
 
   const premissas = [...ctx.premissas.values()];
   if (ancora) premissas.unshift(`Âncora: ${ancora.data.ancora?.descricao ?? 'marco'} — ${ancora.data.calculo}`);
   else premissas.unshift('Sem marco de referência (outorga, decisão de investimento, leilão, plano ou anúncio) — datas dependentes de prazo de energização, se houver.');
-  return { cenario, premissas, datas };
+  return { cenario, premissas, datas, rfqPorEscopo };
 }
 
 function classificarNecessidade(p: Empreendimento, base: CenarioPrevisao, hoje: string, aplicavel: { LT: boolean; SE: boolean }): PrevisaoEmpreendimento['necessidadeComercial'] {
@@ -445,18 +451,24 @@ function classificarNecessidade(p: Empreendimento, base: CenarioPrevisao, hoje: 
   if (escopos.length && contratacoes.every((c) => c?.natureza === 'realizado')) {
     return { classe: 'ja_contratada', descricao: 'Contratação de construção já identificada para todos os escopos.' };
   }
-  const rfq = base.datas.rfq;
-  if (!rfq) return { classe: 'indefinida', descricao: 'Sem marco que permita estimar a demanda; monitorar.' };
-  if (rfq.natureza === 'realizado') {
-    return { classe: 'imediata', mesesAteDemanda: 0, descricao: 'Processo de cotação/RFQ em andamento.' };
+  // Escopos ainda não contratados, com a RFQ correspondente.
+  const pendentes = escopos
+    .filter((e) => base.datas[e === 'LT' ? 'contratacaoLT' : 'contratacaoSE']?.natureza !== 'realizado')
+    .map((e) => ({ e, rfq: base.rfqPorEscopo[e] }));
+  const emCotacao = pendentes.filter((x) => x.rfq?.natureza === 'realizado');
+  if (emCotacao.length) {
+    return { classe: 'imediata', mesesAteDemanda: 0, descricao: `Processo de cotação/RFQ em andamento (${emCotacao.map((x) => x.e).join(' e ')}).` };
   }
-  if (rfq.vencida) {
+  const vencidas = pendentes.filter((x) => x.rfq?.vencida);
+  if (vencidas.length) {
     return {
       classe: 'verificar',
       mesesAteDemanda: 0,
-      descricao: `A janela estimada de RFQ (${formatarDataBR(rfq.data)}) já passou sem evidência de contratação — verificar se houve contratação não identificada ou atraso.`,
+      descricao: `Janela estimada de RFQ de ${vencidas.map((x) => `${x.e} (${formatarDataBR(x.rfq!.data)})`).join(' e ')} já passou sem evidência de contratação — verificar se houve contratação não identificada ou atraso.`,
     };
   }
+  const rfq = pendentes.map((x) => x.rfq).filter((d): d is DataPrevista => !!d).sort((a, b) => (a.data < b.data ? -1 : 1))[0] ?? base.datas.rfq;
+  if (!rfq) return { classe: 'indefinida', descricao: 'Sem marco que permita estimar a demanda; monitorar.' };
   const m = Math.max(0, diferencaMeses(hoje, rfq.data));
   const classe: ClasseNecessidade = m <= 3 ? 'imediata' : m <= 12 ? 'curto_prazo' : m <= 24 ? 'medio_prazo' : 'longo_prazo';
   return { classe, mesesAteDemanda: Math.round(m * 10) / 10, descricao: `RFQ/RFP estimada (cenário base) em ${formatarDataBR(rfq.data)}.` };
@@ -524,7 +536,7 @@ export function preverEmpreendimento(p: Empreendimento, opcoes: OpcoesPrevisao =
 
   const encerrado = p.statusGeral === 'cancelado';
   const cenarios = Object.fromEntries(
-    CENARIOS.map((c) => [c, encerrado ? { cenario: c, premissas: ['Empreendimento cancelado — sem previsão.'], datas: {} } : preverCenario(p, par, hoje, c, avisos)]),
+    CENARIOS.map((c) => [c, encerrado ? { cenario: c, premissas: ['Empreendimento cancelado — sem previsão.'], datas: {}, rfqPorEscopo: {} } : preverCenario(p, par, hoje, c, avisos)]),
   ) as Record<Cenario, CenarioPrevisao>;
 
   const janelas: Partial<Record<EventoPrevisao, Janela>> = {};

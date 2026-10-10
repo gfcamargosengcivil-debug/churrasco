@@ -57,6 +57,8 @@ export interface CenarioPrevisao {
   cenario: Cenario;
   premissas: string[];
   datas: Partial<Record<EventoPrevisao, DataPrevista>>;
+  /** RFQ estimada/observada por escopo (LT e SE separadamente). */
+  rfqPorEscopo: Partial<Record<'LT' | 'SE', DataPrevista>>;
 }
 
 export interface Janela {

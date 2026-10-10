@@ -416,6 +416,8 @@ create table if not exists audit_log (
 );
 create index if not exists audit_em_idx on audit_log (em desc);
 
+create sequence if not exists empreendimento_codigo_seq;
+
 create table if not exists schema_migracao (
   arquivo     text primary key,
   aplicado_em timestamptz not null default now()
