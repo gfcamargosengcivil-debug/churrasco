@@ -15,4 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node radar-lt-se/scripts/sonda/sondar-fontes.mjs
+      - run: npm ci --ignore-scripts
+        working-directory: radar-lt-se
+      - run: node scripts/sonda/sondar-fontes-2.mjs
+        working-directory: radar-lt-se
