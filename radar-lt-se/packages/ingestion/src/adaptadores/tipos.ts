@@ -12,8 +12,21 @@ export interface SinalColetado {
   chaveExterna: string;
 }
 
+/**
+ * Itens que a fonte deixou de listar como ativos (entraram em operação, foram revogados...). Só
+ * atualizam empreendimentos já acompanhados com a mesma chave da fonte; não criam registros.
+ */
+export interface Encerramento {
+  chaveExterna: string;
+  statusGeral: 'concluido' | 'cancelado';
+  marcos?: RegistroNormalizado['marcos'];
+  motivo: string;
+  evidencia: RegistroNormalizado['evidencia'];
+}
+
 export interface ResultadoAdaptador {
   registros: RegistroNormalizado[];
+  encerramentos?: Encerramento[];
   sinais: SinalColetado[];
   avisos: string[];
   /** Linhas/itens lidos da fonte (antes de filtros). */

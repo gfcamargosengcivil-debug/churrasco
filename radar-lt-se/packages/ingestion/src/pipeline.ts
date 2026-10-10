@@ -9,7 +9,7 @@ import {
   mesclarRegistro, novoId, resumoRegistro, type Coleta, type ConfiguracaoPlataforma, type ContextoMescla, type Empreendimento, type EventoMudanca,
   type Fonte, type MatchCandidato, type Organizacao, type RegistroNormalizado,
 } from '@radar/core';
-import type { SinalColetado } from './adaptadores/tipos.js';
+import type { Encerramento, SinalColetado } from './adaptadores/tipos.js';
 
 export interface PortaIngestao {
   listarEmpreendimentos(): Promise<Empreendimento[]>;
@@ -172,6 +172,35 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
   }
   if (eventos.length) await op.porta.registrarEventos(eventos);
   return { coleta, eventos, empreendimentosAfetados: [...afetados] };
+}
+
+/** Aplica encerramentos informados pela fonte aos empreendimentos ativos acompanhados (pela chave da fonte). */
+export async function aplicarEncerramentos(encerramentos: Encerramento[], op: Omit<OpcoesProcessamento, 'vincularA'>): Promise<number> {
+  if (!encerramentos.length) return 0;
+  const projetos = await op.porta.listarEmpreendimentos();
+  const porChave = new Map<string, Empreendimento>();
+  for (const p of projetos) {
+    if (p.statusGeral !== 'ativo') continue;
+    for (const i of p.identificadores) if (i.tipo === 'chave_fonte' && i.valor.startsWith(`${op.fonte.id}|`)) porChave.set(i.valor.slice(op.fonte.id.length + 1), p);
+  }
+  let n = 0;
+  for (const e of encerramentos) {
+    const p = porChave.get(e.chaveExterna);
+    if (!p) continue;
+    const r: RegistroNormalizado = {
+      fonteId: op.fonte.id,
+      chaveExterna: e.chaveExterna,
+      nome: p.nomeOficial,
+      statusGeral: e.statusGeral,
+      situacaoObra: e.statusGeral === 'concluido' ? 'concluida' : undefined,
+      marcos: e.marcos,
+      evidencia: { ...e.evidencia, trecho: `${e.motivo}. ${e.evidencia.trecho ?? ''}`.trim() },
+    };
+    await processarRegistros([r], { ...op, vincularA: p.id, filtrarTensao: false });
+    n++;
+  }
+  if (n) op.coleta.avisos.push(`${n} empreendimento(s) acompanhado(s) encerrado(s) pela fonte (operação ou revogação).`);
+  return n;
 }
 
 export function novaColeta(fonteId: string, disparo: Coleta['disparo'], usuario?: string): Coleta {

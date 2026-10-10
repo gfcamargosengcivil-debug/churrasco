@@ -15,7 +15,7 @@ import {
   type Fonte, type RegistroNormalizado, type UF as Uf,
 } from '@radar/core';
 import { carregarIndiceSE, localizarPorSubestacao } from './epe.js';
-import { buscar, type Adaptador, type ContextoAdaptador, type ResultadoAdaptador } from './tipos.js';
+import { buscar, type Adaptador, type ContextoAdaptador, type Encerramento, type ResultadoAdaptador } from './tipos.js';
 
 type Linha = Record<string, string | number | null>;
 
@@ -90,13 +90,18 @@ export function ufsDoModulo(nome: string): Uf[] {
 
 /** Nomes de SE citados em textos oficiais ("Reforço na SE X: ...", "SE 500/138 kV X – ...", "a SE X e o ..."). */
 export function subestacoesCitadas(t: string): string[] {
-  const nomes = new Set<string>();
-  const re = /\bSE\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*\s*kV\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .'ºª°]*?)(?=\s*(?:[:;,()–]|-|\s\d+(?:[.,]\d+)?\s*kV\b|\s(?:para|com|e|em|ao|à|via|pelo|pela)\s|$))/gi;
+  const nomes = new Map<string, string>();
+  // O nome termina em pontuação, tensão, preposição seguida de número, artigo, conjunção ou em
+  // palavra-chave de obra (Seccionamento, Instalação, LT, Banco...).
+  const fim = String.raw`(?=\s*(?:[:;,()–.]|-|\s\d+(?:[.,]\d+)?\s*kV\b|\s(?:para|com|e|em|ao|à|via|pelo|pela|o|a|os|as|um|uma|no|na|nos|nas)\s|\s(?:de|do|da)\s+\d|\s(?:Seccionamento|Secc|Instala\S*|Implanta\S*|Substitui\S*|Amplia\S*|Adequa\S*|Refor\S*|Melhoria|LTs?|Banco|Reator\S*|Transforma\S*|Autotransforma\S*|Compensa\S*|M[óo]dulo\S*|Entrada|Conex\S*|Interliga\S*|Trecho\S*|Novo|Nova|Setor|Barramento|Recapacita\S*|Recondut\S*)\b|$))`;
+  const re = new RegExp(String.raw`\bSE\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*\s*kV\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .'ºª°]*?)${fim}`, 'g');
   for (const m of t.matchAll(re)) {
     const n = m[1].trim().replace(/\s+/g, ' ').replace(/\.$/, '');
-    if (n.length >= 3 && !/^(nova|existente|associada|seccionadora)s?$/i.test(n)) nomes.add(n);
+    if (n.length < 3 || /^(nova|novas|existente|associada|seccionadora)s?$/i.test(n)) continue;
+    const k = normalizarTexto(n);
+    if (!nomes.has(k)) nomes.set(k, n);
   }
-  return [...nomes];
+  return [...nomes.values()];
 }
 
 const urlRecurso = (base: string, pacote: string, recurso: string) => `${base}/dataset/${pacote}/resource/${recurso}`;
@@ -132,18 +137,28 @@ export function registroSiget(
   const descricaoEpd = texto(l0.DscEpd);
   const modulos = linhas.map((linha) => ({ linha }));
   const tiposObra = new Set(linhas.map((l) => texto(l.DscTipObr)));
+  const textoEpd = `${nome} ${descricaoEpd}`;
+  const contextoSecc = /seccion/i.test(textoEpd);
+  const seSecc = new Set(
+    [...textoEpd.matchAll(/seccion\w*[^.;]*?\b(?:na|em)\s+SE\s+([A-Za-zÀ-ÿ0-9 ]+?)(?=[.,;(]|\s[-–]\s|$)/gi)].map((m) => normalizarTexto(m[1])),
+  );
+  // Módulos gerais/infraestrutura/entrada de linha levam a tensão principal da SE ou da LT remota,
+  // não a da obra: não entram na tensão do empreendimento.
+  const moduloContexto = (nomeMdl: string, sig: string) => sig === 'MG' || /^(MG|IB|EL|MIM|MI|INS)\b/.test(nomeMdl);
 
-  // Tensões e UFs a partir dos nomes oficiais dos módulos e do empreendimento.
+  // Tensões e UFs a partir dos nomes oficiais dos módulos e dos textos do empreendimento/obras.
   const tensoes = new Set<number>();
   const ufs = new Set<Uf>();
   for (const { linha } of modulos) {
-    for (const kv of extrairTensoesKv(texto(linha.NomMdl))) tensoes.add(kv);
-    for (const uf of ufsDoModulo(texto(linha.NomMdl))) ufs.add(uf);
+    const nm = texto(linha.NomMdl);
+    if (!moduloContexto(nm, texto(linha.SigTipMdl))) for (const kv of extrairTensoesKv(nm)) tensoes.add(kv);
+    for (const uf of ufsDoModulo(nm)) ufs.add(uf);
   }
-  for (const kv of extrairTensoesKv(`${nome} ${descricaoEpd}`)) tensoes.add(kv);
+  for (const kv of extrairTensoesKv(`${textoEpd} ${[...new Set(linhas.map((l) => texto(l.DscObr)))].join(' ')}`)) tensoes.add(kv);
 
   // Linhas de transmissão do empreendimento (módulos LT) com origem/destino/extensão oficiais.
   const trechos: NonNullable<RegistroNormalizado['trechosLT']> = [];
+  const detalheLT: string[] = [];
   let extensaoNova = 0;
   const vistos = new Set<string>();
   for (const { linha } of modulos.filter((m) => texto(m.linha.SigTipMdl) === 'LT')) {
@@ -151,42 +166,60 @@ export function registroSiget(
     if (vistos.has(ideMdl)) continue;
     vistos.add(ideMdl);
     const lt = ctx.lts.get(ideMdl);
-    const kv = numero(lt?.NumTensaoBaseLinhaTransm) ?? extrairTensoesKv(texto(linha.NomMdl))[0];
+    const nomeMdl = texto(linha.NomMdl) || texto(lt?.NomLinTms);
+    const kv = numero(lt?.NumTensaoBaseLinhaTransm) ?? extrairTensoesKv(nomeMdl)[0];
     if (!kv) continue;
-    const tipoObra = texto(linha.DscTipObr);
-    // Em seccionamentos os módulos de LT são as linhas resultantes (extensão da linha original
-    // dividida), não o trecho construído: a extensão não é atribuída à obra.
-    const construcao = tipoObra === 'Instalação';
-    const km = numero(lt?.NumEtnLinTms);
-    if (construcao && km) extensaoNova += km;
+    tensoes.add(kv);
+    const dscObr = texto(linha.DscObr);
+    const origem = texto(lt?.NomSubestacaoOrigem);
+    const destino = texto(lt?.NomSubestacaoDestino);
+    // Circuitos resultantes de seccionamento: o módulo tem a extensão da linha resultante (quase toda
+    // existente), não do trecho construído.
+    const resultanteSecc =
+      /seccion|originad|resultante/i.test(dscObr) ||
+      (contextoSecc && [origem, destino].some((x) => x && [...seSecc].some((s) => normalizarTexto(x).includes(s) || s.includes(normalizarTexto(x)))));
+    const kmModulo = numero(lt?.NumEtnLinTms);
+    const kmObra = /(\d+(?:[.,]\d+)?)\s*km\b/i.exec(dscObr)?.[1];
+    let km: number | undefined;
+    if (texto(linha.DscTipObr) === 'Instalação' && !resultanteSecc) km = kmModulo;
+    else if (resultanteSecc && kmObra && /constru|implanta|trecho/i.test(dscObr)) km = numero(kmObra);
+    if (km) extensaoNova += km;
+    detalheLT.push(`${nomeMdl}: NumEtnLinTms=${texto(lt?.NumEtnLinTms) || '∅'}${km ? ` (obra: ${km} km)` : ' (não atribuída à obra)'}`);
     for (const uf of [texto(lt?.SigUFSubestacaoOrigem), texto(lt?.SigUFSubestacaoDestino)]) if (ehUf(uf)) ufs.add(uf);
     trechos.push({
       // Nome do módulo traz o circuito ("C-1"): distingue circuitos da mesma LT.
-      nome: texto(linha.NomMdl) || texto(lt?.NomLinTms),
+      nome: nomeMdl,
       tensaoKv: kv,
-      corrente: 'CA',
-      // Recapacitação/adequação de linha existente: a extensão é da linha, não de obra nova.
-      extensaoKm: construcao ? km : undefined,
+      corrente: /\bcc\b|±|bipolo|hvdc|kvcc/i.test(`${nomeMdl} ${textoEpd}`) || kv === 600 || kv === 800 ? 'CC' : 'CA',
+      extensaoKm: km,
       circuitos: numero(lt?.NumCcuLinTms) ? Math.round(numero(lt?.NumCcuLinTms)!) : undefined,
-      origem: texto(lt?.NomSubestacaoOrigem) || undefined,
-      destino: texto(lt?.NomSubestacaoDestino) || undefined,
+      origem: origem || undefined,
+      destino: destino || undefined,
     });
   }
   const temLT = trechos.length > 0;
   const temSE = modulos.some((m) => ['ME', 'MG', 'MM'].includes(texto(m.linha.SigTipMdl)) && !/^(EL|IB)\b/.test(texto(m.linha.NomMdl)));
   const tipo = temLT && temSE ? 'LT+SE' : temLT ? 'LT' : 'SE';
 
-  const ses = subestacoesCitadas(`${nome} ${descricaoEpd}`);
-  const novaSE = /\b(nova\s+(?:SE|subesta)|SE\s+nova|implanta[çc][ãa]o\s+da\s+SE)/i.test(`${nome} ${descricaoEpd}`);
-  const kvs = [...tensoes].sort((a, b) => b - a);
+  const reforco = /refor[cç]o|melhoria/i.test(textoEpd);
+  const ses = subestacoesCitadas(textoEpd);
+  const novaSE = (!reforco && /^(SEs?|Subesta)/i.test(nome)) || /\b(nova\s+(?:SE|subesta)|SE\s+nova|implanta[çc][ãa]o\s+da\s+SE)/i.test(textoEpd);
+  const kvs = [...tensoes].filter((k) => k > 0).sort((a, b) => b - a);
   const subestacoes: NonNullable<RegistroNormalizado['subestacoes']> = kvs.length
     ? ses.map((s) => ({ nome: `SE ${s}`, natureza: novaSE ? 'nova' : 'ampliacao', tensoesKv: kvs }))
     : [];
 
-  // Ato de outorga: resolução autorizativa (quando houver) ou contrato de concessão.
-  const contrato = ctx.contratos.get(texto(l0.IdeCcd));
+  // Contrato do escopo: o da resolução (quando houver); senão, o mais frequente entre os módulos que
+  // não são circuitos resultantes de seccionamento (esses ficam no contrato do dono da LT seccionada).
   const rea = ctx.resolucoes.get(ide);
-  const reforco = /refor[cç]o|melhoria/i.test(`${nome} ${descricaoEpd}`);
+  const freq = new Map<string, number>();
+  for (const l of linhas) {
+    if (/seccion|originad|resultante/i.test(texto(l.DscObr))) continue;
+    const k = texto(l.IdeCcd);
+    if (k) freq.set(k, (freq.get(k) ?? 0) + 1);
+  }
+  const ideCcd = texto(rea?.IdeCcd) || [...freq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || texto(l0.IdeCcd);
+  const contrato = ctx.contratos.get(ideCcd);
   const marcos: NonNullable<RegistroNormalizado['marcos']> = [];
   const identificadores: NonNullable<RegistroNormalizado['identificadores']> = [{ tipo: 'aneel_siget_empreendimento', valor: ide }];
   const onsEpd = texto(l0.IdeOnsEpd);
@@ -216,7 +249,8 @@ export function registroSiget(
   if (prazo) marcos.push({ tipo: 'prazo_contratual_energizacao', data: prazo, natureza: 'previsto_oficial', descricao: 'Previsão de conclusão do empreendimento no ato legal (SIGET: DatCaoCgmAtoLgl)' });
   const efetiva = data(l0.DatEfeOprComEpd);
   const operacao = data(l0.DatOprComEpd);
-  if (efetiva && efetiva <= ctx.hoje) {
+  const concluidoSiget = situacao === 'Em Operação' || situacao === 'Concluído';
+  if (efetiva && efetiva <= ctx.hoje && concluidoSiget) {
     marcos.push({ tipo: 'operacao_comercial', data: efetiva, natureza: 'realizado', descricao: 'Data efetiva de início de operação comercial (SIGET: DatEfeOprComEpd)' });
   } else if (operacao && operacao !== prazo) {
     marcos.push({ tipo: 'operacao_comercial', data: operacao, natureza: 'previsto_oficial', descricao: 'Data de operação comercial registrada no SIGET (DatOprComEpd)' });
@@ -227,6 +261,7 @@ export function registroSiget(
   const descricao = [
     descricaoEpd,
     `Situação no SIGET: ${situacao || 'não informada'}. Tipos de obra: ${[...tiposObra].filter(Boolean).join(', ') || '—'}.`,
+    efetiva && !concluidoSiget ? `Operação comercial efetiva registrada em ${efetiva} com o empreendimento ainda "${situacao}" (operação parcial).` : '',
     obras.length ? `Obras (${obras.length}): ${obras.slice(0, 6).join(' | ')}${obras.length > 6 ? ' …' : ''}` : '',
     rea && texto(rea.DscLink) ? `Ato: ${texto(rea.DscLink)}` : '',
   ].filter(Boolean).join('\n');
@@ -239,7 +274,9 @@ export function registroSiget(
     `DatCaoCgmAtoLgl=${texto(l0.DatCaoCgmAtoLgl) || '∅'}`,
     `DatOprComEpd=${texto(l0.DatOprComEpd) || '∅'}`,
     `DatEfeOprComEpd=${texto(l0.DatEfeOprComEpd) || '∅'}`,
-    contrato && `Contrato ${texto(contrato.NumCnaCcd)} (${texto(contrato.DscRazaoSocial)})`,
+    rea && `[Resolução Contrato Agente] CodReg=${texto(rea.CodReg)}; DatAssDoc=${texto(rea.DatAssDoc).slice(0, 10)}; DatPubDoc=${texto(rea.DatPubDoc).slice(0, 10)}; DscLink=${texto(rea.DscLink)}`,
+    contrato && `[Contrato Agente] IdeCcd=${ideCcd}; NumCnaCcd=${texto(contrato.NumCnaCcd)}; DatAsnCcd=${texto(contrato.DatAsnCcd)}; DscRazaoSocial="${texto(contrato.DscRazaoSocial)}"; NumCNPJ=${texto(contrato.NumCNPJ)}`,
+    detalheLT.length && `[Módulos LT] ${detalheLT.join(' | ')}`,
   ].filter(Boolean).join('; ');
 
   return {
@@ -308,12 +345,16 @@ export const adaptadorSiget: Adaptador = {
     const limiteRecente = somarMeses(ctx.hoje, -Math.round(diasRecentes / 30));
 
     const porEpd = new Map<string, Linha[]>();
+    const foraDoRadar = new Map<string, Linha>();
     for (const l of linhas) {
       const situacao = texto(l.DscSituacaoEpd);
       const efetiva = data(l.DatEfeOprComEpd);
       const recente = (situacao === 'Em Operação' || situacao === 'Concluído') && !!efetiva && efetiva >= limiteRecente;
-      if (!ativas.includes(situacao) && !recente) continue;
       const k = texto(l.IdeEpd);
+      if (!ativas.includes(situacao) && !recente) {
+        if (!foraDoRadar.has(k)) foraDoRadar.set(k, l);
+        continue;
+      }
       porEpd.set(k, [...(porEpd.get(k) ?? []), l]);
     }
     const registros: RegistroNormalizado[] = [];
@@ -325,8 +366,24 @@ export const adaptadorSiget: Adaptador = {
       else registros.push(r);
     }
     await localizar(registros, c, ctx, avisos);
+    // Empreendimentos fora do radar (em operação há mais tempo ou sem situação/revogados): encerram os
+    // que estiverem sendo acompanhados.
+    const encerramentos: Encerramento[] = [];
+    for (const [k, l] of foraDoRadar) {
+      if (porEpd.has(k)) continue;
+      const situacao = texto(l.DscSituacaoEpd);
+      const efetiva = data(l.DatEfeOprComEpd);
+      const operando = situacao === 'Em Operação' || situacao === 'Concluído';
+      encerramentos.push({
+        chaveExterna: `siget:${k}`,
+        statusGeral: operando ? 'concluido' : 'cancelado',
+        marcos: operando && efetiva ? [{ tipo: 'operacao_comercial', data: efetiva, natureza: 'realizado', descricao: 'Data efetiva de início de operação comercial (SIGET: DatEfeOprComEpd)' }] : undefined,
+        motivo: operando ? `SIGET informa situação "${situacao}"` : 'SIGET sem situação para o empreendimento (revogado ou desativado no cadastro)',
+        evidencia: { titulo: `ANEEL/SIGET — ${texto(l.NomEpd)}`.slice(0, 250), url: urlEvidencia, tipoDocumento: 'planilha', dataPublicacao: data(l.DatGeracaoConjuntoDados), dataColeta: ctx.hoje, trecho: `IdeEpd=${k}; NomEpd="${texto(l.NomEpd)}"; DscSituacaoEpd=${situacao || '∅'}; DatEfeOprComEpd=${texto(l.DatEfeOprComEpd) || '∅'}` },
+      });
+    }
     avisos.push(`SIGET: ${linhas.length} módulos lidos (carga de ${recEpd.modificado?.slice(0, 10) ?? '?'}); ${porEpd.size} empreendimentos em andamento/planejados ou concluídos nos últimos ${diasRecentes} dias.`);
-    return { registros, sinais: [], avisos, lidos: linhas.length };
+    return { registros, encerramentos, sinais: [], avisos, lidos: linhas.length };
   },
 };
 
@@ -342,22 +399,25 @@ interface ConfigLeiloes extends ConfigCkanAneel {
 }
 
 /** Converte um lote leiloado em registro. */
-export function registroLeilao(l: Linha, ctx: { fonte: Fonte; hoje: string; url: string; mesesAssinatura: number }): RegistroNormalizado | { erro: string } {
+export function registroLeilao(l: Linha, ctx: { fonte: Fonte; hoje: string; url: string; mesesAssinatura: number; descricaoRepetida?: boolean }): RegistroNormalizado | { erro: string } {
   const numLeilao = texto(l.NumLeilao);
   const lote = texto(l.NumLoteLeilao);
   const bruto = texto(l.NomEmpreendimento).replace(/\s+/g, ' ');
   if (!bruto) return { erro: `Leilão ${numLeilao} lote ${lote}: sem descrição` };
+  // Descrição oficial repetida em lotes diferentes do mesmo leilão (divergência da fonte): não se
+  // deriva nome, tensões nem instalações dela.
+  const confiavel = !ctx.descricaoRepetida;
   // A descrição oficial lista as instalações separadas por "- " no início de cada item.
   const itens = bruto.split(/-\s+(?=(?:LT|SE|Trechos?|Sublote|Novas|Compensador|Reator|Seccionamento|CS|CE)\b)/i).map((s) => s.replace(/[-–\s]+$/, '').trim()).filter((s) => s.length > 3);
   const principal = (itens[0] ?? bruto).slice(0, 140);
-  const nome = `Leilão ${numLeilao} · Lote ${lote}: ${principal}`;
+  const nome = confiavel ? `Leilão ${numLeilao} · Lote ${lote}: ${principal}` : `Leilão ${numLeilao} · Lote ${lote} (${texto(l.SigUFPrincipal)})`;
   const dataLeilao = data(l.DatLeilao);
   const km = numero(l.MdaExtensaoLinhaTransmissaoKm);
   const mva = numero(l.MdaSubEstacoesMVA);
   const prazoMeses = numero(l.QtdPrazoConstrucaoMeses);
-  const tensoes = extrairTensoesKv(bruto);
-  const temSE = (mva ?? 0) > 0 || /\bSE\b|subesta/i.test(bruto);
-  const temLT = (km ?? 0) > 0 || /\bLT\b/.test(bruto);
+  const tensoes = confiavel ? extrairTensoesKv(bruto) : [];
+  const temSE = (mva ?? 0) > 0 || (confiavel && /\bSE\b|subesta/i.test(bruto));
+  const temLT = (km ?? 0) > 0 || (confiavel && /\bLT\b/.test(bruto));
   const ufs = texto(l.SigUFPrincipal).split(/[\/,;\s]+/).filter(ehUf);
   const marcos: NonNullable<RegistroNormalizado['marcos']> = [];
   if (dataLeilao) {
@@ -376,12 +436,12 @@ export function registroLeilao(l: Linha, ctx: { fonte: Fonte; hoje: string; url:
     fonteId: ctx.fonte.id,
     chaveExterna: `leilao:${numLeilao}:${lote}`,
     nome,
-    nomesAlternativos: itens.slice(0, 8).map((s) => s.slice(0, 200)),
+    nomesAlternativos: confiavel ? itens.slice(0, 8).map((s) => s.slice(0, 200)) : undefined,
     identificadores: [{ tipo: 'aneel_leilao_lote', valor: `${numLeilao} lote ${lote}` }],
     tipo: temLT && temSE ? 'LT+SE' : temLT ? 'LT' : 'SE',
     setorOrigem: 'transmissao',
     subsetor: 'transmissao_regulada',
-    descricao: `${bruto}\nPrazo de construção do edital: ${prazoMeses ?? '?'} meses. Investimento previsto (ANEEL): ${texto(l.VlrInvestimentoPrevisto) || '?'}; RAP vencedora: ${texto(l.VlrRAPVencedorLeilao) || '?'} (deságio ${texto(l.PctDesagio) || '?'}).`,
+    descricao: `${confiavel ? bruto : `Descrição oficial deste lote repete a de outro lote do mesmo leilão (divergência na fonte): "${bruto.slice(0, 200)}".`}\nPrazo de construção do edital: ${prazoMeses ?? '?'} meses. Investimento previsto (ANEEL): ${texto(l.VlrInvestimentoPrevisto) || '?'}; RAP vencedora: ${texto(l.VlrRAPVencedorLeilao) || '?'} (deságio ${texto(l.PctDesagio) || '?'}).`,
     organizacoes: vencedor ? [{ nome: vencedor, papel: 'concessionaria', tipo: 'concessionaria_transmissao' }] : undefined,
     ufs,
     tensoesKv: tensoes.length ? tensoes : undefined,
@@ -389,9 +449,11 @@ export function registroLeilao(l: Linha, ctx: { fonte: Fonte; hoje: string; url:
     capacidadeMva: mva && mva > 0 ? mva : undefined,
     capexInfraEletricaBRL: numero(l.VlrInvestimentoPrevisto),
     rapAnualBRL: numero(l.VlrRAPVencedorLeilao),
+    // Investimento previsto pela ANEEL é estimativa de referência do edital (preços da época do leilão).
+    valoresMonetarios: { natureza: 'estimado', dataBase: dataLeilao, observacao: 'investimento previsto pela ANEEL para o lote (referência do edital)' },
     marcos,
     situacoes: { regulatoria: 'outorgada' },
-    statusGeral: 'ativo',
+    // O conjunto não informa o andamento: o status não é afirmado por esta fonte.
     evidencia: {
       titulo: `ANEEL — Resultado de leilões de transmissão: Leilão ${numLeilao}, lote ${lote}`,
       url: ctx.url,
@@ -417,12 +479,32 @@ export const adaptadorLeiloesTransmissao: Adaptador = {
     const registros: RegistroNormalizado[] = [];
     const avisos: string[] = [];
     const url = urlRecurso(base, pacote, rec.id);
+    const meses = c.mesesLeilaoAssinatura ?? 3;
+    // Descrições repetidas entre lotes do mesmo leilão.
+    const porDescricao = new Map<string, string[]>();
+    for (const l of linhas) {
+      const k = `${texto(l.NumLeilao)}|${normalizarTexto(texto(l.NomEmpreendimento))}`;
+      porDescricao.set(k, [...(porDescricao.get(k) ?? []), texto(l.NumLoteLeilao)]);
+    }
+    let antigos = 0;
     for (const l of linhas) {
       if ((numero(l.AnoLeilao) ?? 0) < anoMinimo) continue;
-      const r = registroLeilao(l, { fonte, hoje: ctx.hoje, url, mesesAssinatura: c.mesesLeilaoAssinatura ?? 3 });
+      // Lote cuja energização estimada passou há mais de 12 meses: provavelmente em operação; não entra
+      // como oportunidade (o SIGET informa o andamento real dos que seguem em implantação).
+      const dl = data(l.DatLeilao);
+      const prazo = numero(l.QtdPrazoConstrucaoMeses);
+      if (dl && prazo && somarMeses(dl, meses + prazo) < somarMeses(ctx.hoje, -12)) {
+        antigos++;
+        continue;
+      }
+      const lotes = porDescricao.get(`${texto(l.NumLeilao)}|${normalizarTexto(texto(l.NomEmpreendimento))}`) ?? [];
+      const repetida = lotes.length > 1;
+      if (repetida) avisos.push(`Leilão ${texto(l.NumLeilao)}: a descrição oficial do lote ${texto(l.NumLoteLeilao)} repete a dos lotes ${lotes.filter((x) => x !== texto(l.NumLoteLeilao)).join(', ')} (divergência na fonte; nome e tensões não derivados do texto).`);
+      const r = registroLeilao(l, { fonte, hoje: ctx.hoje, url, mesesAssinatura: meses, descricaoRepetida: repetida });
       if ('erro' in r) avisos.push(r.erro);
       else registros.push(r);
     }
+    if (antigos) avisos.push(`${antigos} lote(s) com energização estimada anterior a 12 meses atrás não incluídos (provavelmente em operação).`);
     await localizar(registros, c, ctx, avisos);
     const ultimo = linhas.map((l) => texto(l.DatLeilao).slice(0, 10)).sort().at(-1);
     avisos.push(`Leilões: ${linhas.length} lotes no conjunto (último leilão registrado: ${ultimo ?? '?'}); ${registros.length} lotes desde ${anoMinimo}.`);

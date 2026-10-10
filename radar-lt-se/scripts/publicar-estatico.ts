@@ -86,8 +86,9 @@ async function exportar(caminho: string, substituto?: unknown): Promise<unknown>
 // Visitante da versão publicada: somente leitura (a interface oculta ações de edição).
 await exportar('/eu', { id: 'visitante', nome: 'Visitante', papel: 'leitor' });
 await exportar('/ia/status', { habilitada: false, modo: 'Versão publicada somente leitura (sem IA generativa).' });
+const qualidade = (await exportar('/qualidade')) as { duplicidades?: unknown[] } | undefined;
 for (const c of [
-  '/painel', '/funil', '/mapa', '/qualidade', '/calibracao', '/config', '/fontes', '/coletas', '/organizacoes',
+  '/painel', '/funil', '/mapa', '/calibracao', '/config', '/fontes', '/coletas', '/organizacoes',
   '/comercial/oportunidades', '/comercial/pipelines', '/alertas/regras', '/alertas/notificacoes', '/alertas/notificacoes?lido=0',
   '/eventos?limite=300', '/documentos', '/documentos?tipo=noticia', '/export/radar.xlsx', '/importacao/modelo',
   ...['otimista', 'base', 'conservador'].map((c) => `/demanda?cenario=${c}&meses=36`),
@@ -104,11 +105,16 @@ for (const c of clientes ?? []) await exportar(`/clientes/${c.organizacao.id}`);
 const documentos = (await app.inject('/api/documentos')).json() as { id: string }[];
 for (const d of documentos) await exportar(`/documentos/${d.id}`);
 
+const incertos = coletas.reduce((t, c) => t + c.avisos.reduce((u, a) => u + Number(/^(\d+) registro\(s\) com correspondência incerta/.exec(a)?.[1] ?? 0), 0), 0);
 await exportar('/publicacao', {
   geradoEm: new Date().toISOString(),
   hoje: hojeISO(),
   coletas: coletas.map(({ avisos: _a, ...c }) => c),
   empreendimentos: lista?.length ?? 0,
+  /** Registros desta coleta cadastrados como novos por correspondência incerta (sem revisor). */
+  incertos,
+  /** Pares de empreendimentos com alta similaridade (podem ser o mesmo empreendimento). */
+  possiveisDuplicidades: qualidade?.duplicidades?.length ?? 0,
   demo,
 });
 await app.close();

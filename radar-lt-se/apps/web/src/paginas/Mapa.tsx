@@ -147,7 +147,7 @@ export function PaginaMapa() {
                 const vs = c.itens.map((i) => porId.get(i)!).filter(Boolean);
                 return (
                   <tr key={c.id}>
-                    <td>{[...new Set(vs.flatMap((v) => v.municipios.map((m) => m.split('/')[1])))].join(', ')} <span className="muted">({c.centro.lat.toFixed(1)}, {c.centro.lon.toFixed(1)})</span></td>
+                    <td>{[...new Set(vs.flatMap((v) => v.ufs))].slice(0, 4).join(', ') || '—'} <span className="muted">({c.centro.lat.toFixed(1)}, {c.centro.lon.toFixed(1)})</span></td>
                     <td className="num">{c.itens.length}</td>
                     <td className="num">{brl(vs.reduce((s, v) => s + (v.mercado.central ?? 0), 0))}</td>
                     <td>{[...new Set(vs.map((v) => ROTULO_SETOR[v.setor]))].join(', ')}</td>
@@ -158,12 +158,12 @@ export function PaginaMapa() {
           </table></div>
           {!clusters.length && <div className="vazio">Nenhum cluster com os filtros atuais.</div>}
         </Cartao>
-        <Cartao titulo="Corredores elétricos" sub="Trechos de LT conectados por subestações em comum (pelas extremidades registradas)">
+        <Cartao titulo="Polos de expansão" sub="Subestações onde chegam duas ou mais LTs de empreendimentos ativos (SE do polo em primeiro lugar, seguida das SEs ligadas a ela)">
           <div className="tabela-rolagem"><table className="tabela">
-            <thead><tr><th>Subestações</th><th className="num">Trechos</th><th className="num">km</th><th className="num">kV máx.</th></tr></thead>
+            <thead><tr><th>Polo · SEs ligadas</th><th className="num">LTs</th><th className="num">km</th><th className="num">kV máx.</th></tr></thead>
             <tbody>
               {dados.corredores.filter((c) => c.empreendimentoIds.some((i) => ids.has(i))).map((c) => (
-                <tr key={c.id}><td className="pequeno">{c.subestacoes.join(' · ')}</td><td className="num">{c.trechos}</td><td className="num">{c.extensaoKm}</td><td className="num">{c.tensaoMaxKv}</td></tr>
+                <tr key={c.id}><td className="pequeno"><strong>{c.subestacoes[0]}</strong>{c.subestacoes.length > 1 && <> · {c.subestacoes.slice(1, 9).join(' · ')}{c.subestacoes.length > 9 ? ` · +${c.subestacoes.length - 9}` : ''}</>}</td><td className="num">{c.trechos}</td><td className="num">{c.extensaoKm}</td><td className="num">{c.tensaoMaxKv}</td></tr>
               ))}
             </tbody>
           </table></div>

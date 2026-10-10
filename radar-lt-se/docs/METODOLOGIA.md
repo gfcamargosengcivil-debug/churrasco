@@ -21,6 +21,13 @@ estão no código (`packages/core`) e são exibidas na interface (página **Meto
 Uma concessão assinada ou uma licença emitida **não** é tratada como contratação de obra:
 é apenas um marco a partir do qual a contratação é estimada.
 
+Quando a fonte não registra o andamento por etapa (caso dos cadastros oficiais, que trazem outorga
+e prazos), a **etapa atual é inferida** do marco ou situação mais avançada: energização realizada →
+comissionamento; obra/mobilização → construção; RFQ/contrato de execução → contratação de execução;
+outorga, leilão ou FID realizados (ou situação outorgada/autorizada) → concessão; edital/consulta
+pública → contratação regulatória; licenças → licenciamento; inclusão em plano → planejamento;
+anúncio → sinal de mercado. A ficha indica que a etapa é inferida.
+
 Fluxos padrão: transmissão por leilão; reforço/melhoria autorizado (REA); privado
 (mineração/indústria/grandes consumidores); conexão de geração; distribuição AT.
 
@@ -163,6 +170,25 @@ empreendedor +0,15; localização ≤ 60 km +0,10 (> 180 km −0,15); extensão 
 ≥ 0,85 vincula automaticamente (sem ambiguidade); 0,55–0,85 vai para **revisão manual**;
 abaixo cria novo empreendimento.
 
+**Identidade estrutural de LT.** Uma LT é identificada por extremidades + tensão + circuito
+(seccionamentos: LT seccionada + SE de seccionamento). Mesmas extremidades, tensão e circuito em
+todas as LTs do registro → correspondência forte (≥ 0,86, prevalece sobre diferenças de localização e
+extensão indicativas); mesmas extremidades com circuitos diferentes → instalações distintas (−0,35).
+Identificadores exclusivos (código SIGET, código ONS, lote de leilão, CEG) diferentes provam que são
+empreendimentos distintos; contrato de concessão e REA são compartilhados por vários empreendimentos
+e apenas somam pontos. A chave do item na fonte é guardada para reconhecer o mesmo item nas coletas
+seguintes.
+
+**Fontes complementares.** Planejamento (EPE) e lotes de leilão, ao se ligarem a um empreendimento
+já documentado por outra fonte, só acrescentam traçado de trechos correspondentes, identificadores,
+nomes, participantes, marcos de tipos ainda ausentes e — quando o registro corresponde inteiramente ao
+empreendimento — o investimento declarado; extensão total, tipo e situações não são comparados entre
+parte e todo. O tipo combina escopos (LT + SE = LT+SE) sem gerar conflito.
+
+**Execução sem revisor** (publicação automática): correspondências incertas (0,55–0,85) viram
+empreendimentos novos em vez de ficarem pendentes; os pares semelhantes aparecem em Qualidade →
+Possíveis duplicidades.
+
 Mescla: valor novo → proveniência; valor igual → reforço (nova evidência, última
 confirmação); valor divergente → **conflito visível** com todos os valores e fontes. O
 valor adotado segue: maior classe de fonte → publicação mais recente → mantém o atual;
@@ -170,3 +196,20 @@ o conflito permanece aberto até resolução manual com justificativa. Revisões
 previstas por fonte de classe igual/maior ou mais recente atualizam o marco e geram
 evento de "revisão de cronograma" (e "atraso" se ≥ 60 dias). Extrações por IA entram
 sempre como **inferidas**.
+
+## 7. Fontes automáticas e mapeamento
+
+| Fonte | Campo oficial | Uso na plataforma |
+|---|---|---|
+| ANEEL SIGET | `DscSituacaoEpd` | Em andamento/Planejado → ativo; Em Operação/Concluído (últimos 12 meses) → concluído |
+| | `DatCaoCgmAtoLgl` ("previsão de conclusão no ato legal") | prazo contratual de energização (divulgado) |
+| | `DatOprComEpd` | data de operação comercial registrada (divulgada), quando difere do prazo |
+| | `DatEfeOprComEpd` | operação comercial realizada |
+| | Resolução (REA): `DatPubDoc`/`DatAssDoc`, `DscLink` | autorização publicada (realizado), link do ato |
+| | Contrato: `DatAsnCcd`, razão social | outorga (só se compatível com o prazo do escopo), concessionária |
+| | Módulos LT: origem/destino, `NumEtnLinTms`, circuitos | trechos; extensão só de obras de instalação |
+| ANEEL leilões de transmissão | data, lote, `QtdPrazoConstrucaoMeses`, km, MVA, `VlrInvestimentoPrevisto`, vencedor | leilão realizado, investimento elétrico declarado, energização **estimada** (leilão + premissa + prazo do edital, rotulada) |
+| EPE WebMap | nome, ano previsto, tensão, extensão, geometria | inclusão em plano, energização divulgada (precisão anual, 31/12), traçado aproximado, UF pela geometria; extensão validada contra o traçado |
+| EPE WebMap (SEs) | nome + UF | localização de obras sem coordenadas pela SE homônima (inequívoca; existente = precisão "subestação", planejada = "aproximada") |
+
+`VlrHisRct` (receita do contrato) não é usado como investimento.

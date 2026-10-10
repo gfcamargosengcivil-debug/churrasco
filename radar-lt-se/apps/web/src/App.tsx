@@ -30,6 +30,8 @@ interface Publicacao {
   geradoEm: string;
   coletas: { fonteId: string; fonte: string; status: string; registrosLidos: number; criados: number; atualizados: number; erros: string[] }[];
   empreendimentos: number;
+  incertos?: number;
+  possiveisDuplicidades?: number;
   demo?: boolean;
 }
 
@@ -45,6 +47,7 @@ function AvisoPublicacao({ p }: { p: Publicacao }) {
         </>
       )}
       {falhas.length > 0 && <> Sem resposta nesta coleta: {falhas.map((c) => c.fonte).join('; ')} — dados anteriores mantidos.</>}
+      {!!p.possiveisDuplicidades && <> {p.possiveisDuplicidades} par(es) de registros semelhantes podem ser o mesmo empreendimento (<a href="#/qualidade">Qualidade → Possíveis duplicidades</a>); totais podem estar superestimados.</>}
       {' '}Datas calculadas são estimativas da plataforma, não compromissos dos empreendedores.
     </div>
   );

@@ -3,7 +3,7 @@ import {
   type MatchCandidato, type Organizacao, type RegistroNormalizado, type TipoDocumento,
 } from '@radar/core';
 import {
-  ADAPTADORES, AdaptadorNaoConfigurado, extrairTextoDocumento, finalizarColeta, lerPlanilha, mapearLinhas, novaColeta,
+  ADAPTADORES, AdaptadorNaoConfigurado, aplicarEncerramentos, extrairTextoDocumento, finalizarColeta, lerPlanilha, mapearLinhas, novaColeta,
   processarRegistros, type PortaIngestao, type SinalColetado,
 } from '@radar/ingestion';
 import { analisarDocumento, registroDeAnalise, type ResultadoAnaliseDocumental, type SelecaoAplicacao } from '@radar/ai';
@@ -61,6 +61,7 @@ export class ServicoIngestao {
       coleta.avisos.push(...res.avisos);
       const cfg = await this.s.configuracao();
       await processarRegistros(res.registros, { porta: this.porta, fonte: f, coleta, config: cfg, por: usuario ?? `fonte:${f.id}`, semRevisaoManual: opcoes.semRevisaoManual });
+      await aplicarEncerramentos(res.encerramentos ?? [], { porta: this.porta, fonte: f, coleta, config: cfg, por: usuario ?? `fonte:${f.id}` });
       coleta.registrosLidos = Math.max(coleta.registrosLidos, res.lidos);
       if (res.sinais.length) {
         const novos = await this.porta.registrarSinais(res.sinais, coleta.id);

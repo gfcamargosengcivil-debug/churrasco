@@ -186,18 +186,22 @@ function AbaGeral({ p, v, orgs, dados, podeEditar, papel, recarregar }: { p: Emp
           <div><div className="sub">Engenharia</div><strong>{ROTULO_SITUACAO[p.situacoes.engenharia]}</strong></div>
           <div><div className="sub">Fase de contratação — LT</div><SeloFase fase={v.fase.LT} /></div>
           <div><div className="sub">Fase de contratação — SE</div><SeloFase fase={v.fase.SE} /></div>
-          <div><div className="sub">Situação da obra</div><strong>{ROTULO_SITUACAO_OBRA[p.situacaoObra]}</strong></div>
+          <div><div className="sub">Situação da obra</div><strong>{p.proveniencia.situacaoObra || p.situacaoObra !== 'nao_iniciada' ? ROTULO_SITUACAO_OBRA[p.situacaoObra] : 'Não informada pelas fontes'}</strong></div>
           <div><div className="sub">Necessidade comercial</div><strong>{ROTULO_NECESSIDADE[v.previsao.necessidadeComercial.classe]}</strong><div className="meta pequeno">{v.previsao.necessidadeComercial.descricao}</div></div>
         </div>
         <div className="sep" />
         <h3 style={{ margin: '8px 0' }}>Maturidade do projeto · fluxo “{p.fluxoId.replace(/_/g, ' ')}”</h3>
+        {!statusEtapa.size && v.etapa && (
+          <p className="pequeno muted" style={{ margin: '0 0 6px' }}>As fontes não registram o andamento por etapa: a etapa atual ({v.etapa.nome}) é inferida do marco mais avançado (ver Metodologia).</p>
+        )}
         <div className="etapas">
           {etapasFluxo.map((e) => {
             const st = statusEtapa.get(e.id);
+            const inferida = !statusEtapa.size && v.etapa?.id === e.id;
             return (
-              <div key={e.id} className={`etapa ${st?.status ?? 'nao_iniciada'}`} title={e.descricao}>
+              <div key={e.id} className={`etapa ${st?.status ?? (inferida ? 'em_andamento' : 'nao_iniciada')}`} title={e.descricao}>
                 <strong>{e.ordem}. {e.nome}</strong>
-                {st?.status === 'concluida' ? '✓ concluída' : st?.status === 'em_andamento' ? '▶ em andamento' : st?.status === 'nao_aplicavel' ? 'não aplicável' : 'não iniciada'}
+                {st?.status === 'concluida' ? '✓ concluída' : st?.status === 'em_andamento' ? '▶ em andamento' : st?.status === 'nao_aplicavel' ? 'não aplicável' : inferida ? '▶ etapa atual (inferida)' : statusEtapa.size ? 'não iniciada' : 'sem registro'}
                 {st?.dataInicio && <div className="muted">desde {dataBR(st.dataInicio)}</div>}
               </div>
             );

@@ -18,7 +18,7 @@ export type MetodoMercado = 'contratado' | 'percentual_capex_eletrico' | 'parame
 
 export const ROTULO_METODO_MERCADO: Record<MetodoMercado, string> = {
   contratado: 'Serviços já contratados',
-  percentual_capex_eletrico: '% do investimento elétrico declarado',
+  percentual_capex_eletrico: '% do investimento elétrico (declarado ou de referência)',
   parametrico_fisico: 'Paramétrico (km de LT e subestações)',
   nao_estimavel: 'Não estimável com os dados disponíveis',
 };
@@ -180,7 +180,12 @@ export function estimarMercado(p: Empreendimento, par: ParametrosMercado = PARAM
         avisos.push('Divisão LT/SE do investimento elétrico desconhecida: assumido 50%/50% (faixa larga).');
       }
     }
-    memoria.push(`Investimento em infraestrutura elétrica declarado: ${brl(capexInfraEletricaBRL)}.`);
+    const inv = p.financeiro.capexInfraEletrica;
+    memoria.push(
+      inv?.natureza === 'estimado'
+        ? `Investimento em infraestrutura elétrica de referência (estimativa${inv.observacao ? ` — ${inv.observacao}` : ''}${inv.dataBase ? `, data-base ${inv.dataBase}` : ''}): ${brl(capexInfraEletricaBRL)}.`
+        : `Investimento em infraestrutura elétrica declarado: ${brl(capexInfraEletricaBRL)}.`,
+    );
     if (pendentes.includes('LT') && pesoLT) {
       porEscopo.LT = [capexInfraEletricaBRL * pesoLT * par.participacaoServicosLT[0], capexInfraEletricaBRL * pesoLT * par.participacaoServicosLT[1]];
       memoria.push(`LT: ${brl(capexInfraEletricaBRL)} × ${pct(pesoLT)} × ${pct(par.participacaoServicosLT[0])}–${pct(par.participacaoServicosLT[1])} = ${brl(porEscopo.LT[0])}–${brl(porEscopo.LT[1])}`);

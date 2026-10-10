@@ -196,7 +196,7 @@ export function extrairTensoesKv(texto: string | number | null | undefined): num
   const t = normalizarTexto(texto ?? '');
   const res = new Set<number>();
   // Aceita combinações "230/138 kV", "230/13,8 kV", "230-13,8 kV" e "500/230/13,8 kV".
-  const re = /(?:±|\+-|\+\/-)?\s*(\d{2,4}(?:[.,]\d+)?)((?:\s*[\/-]\s*\d{1,4}(?:[.,]\d+)?)*)\s*kv\b/g;
+  const re = /(?:±|\+-|\+\/-)?\s*(\d{2,4}(?:[.,]\d+)?)((?:\s*[\/-]\s*\d{1,4}(?:[.,]\d+)?)*)\s*kv(?:cc|ca)?\b/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(t))) {
     const valores = [m[1], ...(m[2] ? m[2].split(/[\/-]/).map((x) => x.trim()).filter(Boolean) : [])];

@@ -60,9 +60,14 @@ function dentroDoAnel(p: Coord, anel: Coord[]): boolean {
   return dentro;
 }
 
-function dentroDoPoligono(p: Coord, poligono: Coord[][]): boolean {
-  if (!poligono.length || !dentroDoAnel(p, poligono[0])) return false;
-  return !poligono.slice(1).some((buraco) => dentroDoAnel(p, buraco));
+/**
+ * Regra par-ímpar sobre todos os anéis da feição: independe da ordem/orientação dos anéis (o serviço
+ * pode devolver ilhas e buracos em qualquer ordem num mesmo Polygon).
+ */
+function dentroDaFeicao(p: Coord, aneis: Coord[][]): boolean {
+  let dentro = false;
+  for (const anel of aneis) if (dentroDoAnel(p, anel)) dentro = !dentro;
+  return dentro;
 }
 
 export interface PoligonoUf {
@@ -71,7 +76,7 @@ export interface PoligonoUf {
 }
 
 export function ufDoPonto(p: Coord, ufs: PoligonoUf[]): UF | undefined {
-  return ufs.find((u) => u.poligonos.some((pol) => dentroDoPoligono(p, pol)))?.uf;
+  return ufs.find((u) => u.poligonos.some((pol) => dentroDaFeicao(p, pol)))?.uf;
 }
 
 /** Converte a camada de UFs da EPE em polígonos; identifica a sigla em qualquer atributo com 2 letras válidas. */
@@ -80,8 +85,13 @@ export function poligonosUf(feicoes: FeicaoEpe[]): PoligonoUf[] {
   for (const f of feicoes) {
     const g = f.geometry;
     if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
-    const sigla = Object.values(f.properties).map((v) => String(v ?? '').trim().toUpperCase()).find((v) => (UFS as readonly string[]).includes(v)) as UF | undefined;
-    if (!sigla) continue;
+    // Sigla por campo nomeado (sigla/uf); só na falta dele, o primeiro valor de 2 letras válido.
+    const entradas = Object.entries(f.properties);
+    const nomeado = entradas.find(([k, v]) => /^(sigla|sg_?uf|uf|sigla_?uf|estado_?sigla)$/i.test(k) && (UFS as readonly string[]).includes(String(v ?? '').trim().toUpperCase()));
+    const valor = nomeado?.[1] ?? entradas.map(([, v]) => v).find((v) => (UFS as readonly string[]).includes(String(v ?? '').trim().toUpperCase()));
+    if (!valor) continue;
+    const sigla = String(valor).trim().toUpperCase() as UF;
+    // MultiPolygon: cada polígono avaliado à parte; Polygon: todos os anéis juntos (par-ímpar).
     out.push({ uf: sigla, poligonos: g.type === 'Polygon' ? [g.coordinates] : g.coordinates });
   }
   return out;
@@ -144,9 +154,13 @@ interface ContextoEpe {
   ufs: PoligonoUf[];
 }
 
+/**
+ * O plano informa só o ano de entrada em operação: registrado como estimativa de precisão anual
+ * (meio do ano), nunca como data divulgada — evita precisão artificial no cálculo das janelas.
+ */
 function marcosDoAno(ano: number | undefined): RegistroNormalizado['marcos'] {
   if (!ano) return [];
-  return [{ tipo: 'energizacao', data: `${ano}-12-31`, natureza: 'previsto_oficial', descricao: `Ano previsto para entrada em operação segundo a EPE: ${ano} (precisão anual; registrado como 31/12/${ano}).` }];
+  return [{ tipo: 'energizacao', data: `${ano}-07-01`, natureza: 'previsto_estimado', descricao: `Ano previsto para entrada em operação segundo a EPE: ${ano}. Precisão anual — registrado como 01/07/${ano} apenas para cálculo; não é data divulgada.` }];
 }
 
 /** Agrupa feições de LT com o mesmo nome/ano/tensão (trechos do mesmo seccionamento) em um registro. */
@@ -191,7 +205,8 @@ export function registrosLT(feicoes: FeicaoEpe[], ctx: ContextoEpe): { registros
           if (uf) ufs.add(uf);
         }
         trechos.push({
-          nome,
+          // Feições do mesmo grupo (pernas de um seccionamento) recebem nomes distintos para não se fundirem.
+          nome: g.length > 1 || linhas.length > 1 ? `${nome} (trecho ${trechos.length + 1})` : nome,
           tensaoKv: kv,
           corrente: /\bcc\b|hvdc|±/.test(normalizarTexto(nome)) || kv === 800 || kv === 600 ? 'CC' : 'CA',
           extensaoKm: ext && ext > 0 && g.length === 1 && linhas.length === 1 ? Math.round(ext * 100) / 100 : undefined,
@@ -277,7 +292,8 @@ export const adaptadorEpeWebmap: Adaptador = {
     const [lts, ses, ufsF] = await Promise.all([consultar(ctx.fetch, `${base}/${cLT}`), consultar(ctx.fetch, `${base}/${cSE}`), consultar(ctx.fetch, `${base}/${cUF}`, '*', 0.01)]);
     const ufs = poligonosUf(ufsF);
     const avisos: string[] = [];
-    if (ufs.length < 20) avisos.push(`Camada de UFs com ${ufs.length} polígonos reconhecidos: UF de parte das feições pode ficar em branco.`);
+    const faltantes = UFS.filter((u) => !ufs.some((x) => x.uf === u));
+    if (faltantes.length) avisos.push(`Camada de UFs sem polígono reconhecido para: ${faltantes.join(', ')} — a UF dessas regiões não é atribuída pela geometria.`);
     const rl = registrosLT(lts, { fonte, hoje: ctx.hoje, url: `${base}/${cLT}`, rotuloCamada: 'Linhas de Transmissão - Expansão Planejada', ufs });
     avisos.push(...rl.avisos);
     const registros = [...rl.registros];

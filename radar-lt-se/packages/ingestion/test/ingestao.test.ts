@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import type { Empreendimento, EventoMudanca, Fonte, MatchCandidato, Organizacao } from '@radar/core';
 import {
   CATALOGO_FONTES, adaptadorArcgis, adaptadorCkan, adaptadorInlabs, adaptadorRss, analisarFeed, extrairTextoDocumento,
-  gerarPlanilhaModelo, lerPlanilha, mapearLinhas, novaColeta, finalizarColeta, paginaDoTrecho, processarRegistros,
+  aplicarEncerramentos, gerarPlanilhaModelo, lerPlanilha, mapearLinhas, novaColeta, finalizarColeta, paginaDoTrecho, processarRegistros,
   type PortaIngestao,
 } from '../src/index.js';
 
@@ -150,6 +150,24 @@ describe('pipeline de ingestão', () => {
     expect(p.trechosLT[0]).toMatchObject({ extensaoKm: 120, tracado: { natureza: 'aproximado_digitalizado' } });
     expect(p.marcos.map((m) => m.tipo)).toEqual(['operacao_comercial']);
     expect(p.identificadores).toContainEqual(expect.objectContaining({ tipo: 'chave_fonte', valor: 'epe-webmap|epe:lt:alfa' }));
+  });
+
+  it('encerramento informado pela fonte conclui o empreendimento acompanhado (sem criar outros)', async () => {
+    const porta = new PortaMemoria();
+    const reg = { fonteId: 'aneel-siget', chaveExterna: 'siget:9', nome: 'Reforço na SE Teste: 2º ATF 500/230 kV', tensoesKv: [500], ufs: ['SP' as const], evidencia: { titulo: 'SIGET', tipoDocumento: 'planilha' as const } };
+    await processarRegistros([reg], { porta, fonte: fonte('aneel-siget'), coleta: novaColeta('aneel-siget', 'agendado'), por: 't' });
+    const coleta = novaColeta('aneel-siget', 'agendado');
+    const n = await aplicarEncerramentos(
+      [
+        { chaveExterna: 'siget:9', statusGeral: 'concluido', motivo: 'SIGET informa situação "Em Operação"', marcos: [{ tipo: 'operacao_comercial', data: '2026-08-01', natureza: 'realizado' }], evidencia: { titulo: 'SIGET', tipoDocumento: 'planilha' } },
+        { chaveExterna: 'siget:999', statusGeral: 'cancelado', motivo: 'revogado', evidencia: { titulo: 'SIGET', tipoDocumento: 'planilha' } },
+      ],
+      { porta, fonte: fonte('aneel-siget'), coleta, por: 't' },
+    );
+    expect(n).toBe(1);
+    expect(porta.projetos).toHaveLength(1);
+    expect(porta.projetos[0]).toMatchObject({ statusGeral: 'concluido', situacaoObra: 'concluida' });
+    expect(porta.projetos[0].marcos.some((m) => m.tipo === 'operacao_comercial' && m.natureza === 'realizado')).toBe(true);
   });
 
   it('sem revisor: incerto vira novo (sinalizado); recoleta pela chave da fonte não duplica', async () => {

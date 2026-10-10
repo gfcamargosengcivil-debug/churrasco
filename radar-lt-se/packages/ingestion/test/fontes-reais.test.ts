@@ -163,8 +163,9 @@ describe('EPE WebMap', () => {
     const r = registros[0];
     expect(r).toMatchObject({ tipo: 'LT', tensoesKv: [230], extensaoKm: 65.87, ufs: ['GO'], situacoes: { regulatoria: 'em_planejamento' } });
     expect(r.trechosLT?.[0].tracado?.natureza).toBe('aproximado_digitalizado');
-    expect(r.marcos).toEqual([expect.objectContaining({ tipo: 'energizacao', data: '2037-12-31', natureza: 'previsto_oficial' })]);
-    expect(r.marcos?.[0].descricao).toContain('precisão anual');
+    expect(r.marcos).toEqual([expect.objectContaining({ tipo: 'energizacao', data: '2037-07-01', natureza: 'previsto_estimado' })]);
+    expect(r.marcos?.[0].descricao).toContain('Precisão anual');
+    expect(r.marcos?.[0].descricao).toContain('não é data divulgada');
     expect(r.organizacoes).toBeUndefined();
   });
 
@@ -172,6 +173,7 @@ describe('EPE WebMap', () => {
     const { registros } = registrosLT([SECC_A, SECC_B], ctx);
     expect(registros).toHaveLength(1);
     expect(registros[0].trechosLT).toHaveLength(2);
+    expect(new Set(registros[0].trechosLT!.map((t) => t.nome)).size).toBe(2);
     expect(registros[0].extensaoKm).toBeCloseTo(30.4, 1);
   });
 
@@ -179,8 +181,12 @@ describe('EPE WebMap', () => {
     const r = registroSE(SE_GRACA, { ...ctx, rotuloCamada: 'Subestações - Expansão Planejada' });
     if ('erro' in r) throw new Error(r.erro);
     expect(r).toMatchObject({ nome: 'SE Graça Aranha', tensoesKv: [800, 500], ufs: ['MA'], ponto: { precisao: 'aproximada' } });
-    expect(r.marcos?.[0].data).toBe('2028-12-31');
+    expect(r.marcos?.[0]).toMatchObject({ data: '2028-07-01', natureza: 'previsto_estimado' });
     expect(ufDoPonto([-44.5, -5.5], UF_TESTE)).toBe('MA');
+    // Polygon com a ilha antes do continente (ordem devolvida pelo serviço): par-ímpar resolve.
+    const ilhaPrimeiro: PoligonoUf[] = [{ uf: 'BA', poligonos: [[[[-38.7, -13.0], [-38.6, -13.0], [-38.6, -12.9], [-38.7, -12.9], [-38.7, -13.0]], [[-42, -15], [-39, -15], [-39, -11], [-42, -11], [-42, -15]]]] }];
+    expect(ufDoPonto([-40.5, -12.5], ilhaPrimeiro)).toBe('BA');
+    expect(ufDoPonto([-38.65, -12.95], ilhaPrimeiro)).toBe('BA');
     expect(ufDoPonto([-40, -5.5], UF_TESTE)).toBeUndefined();
   });
 

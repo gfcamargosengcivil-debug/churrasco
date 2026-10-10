@@ -496,7 +496,8 @@ class Mesclador {
     this.subestacoes();
 
     // Financeiro (valores declarados pela fonte)
-    const valor = (v: number) => ({ valorBRL: v, natureza: 'declarado' as const, dataBase: this.evidencia.dataPublicacao });
+    const vm = r.valoresMonetarios;
+    const valor = (v: number) => ({ valorBRL: v, natureza: vm?.natureza ?? ('declarado' as const), dataBase: vm?.dataBase ?? this.evidencia.dataPublicacao, observacao: vm?.observacao });
     this.escalar('financeiro.capexTotal', r.capexTotalBRL, () => p.financeiro.capexTotal?.valorBRL, (v) => (p.financeiro.capexTotal = valor(v)));
     this.escalar('financeiro.capexInfraEletrica', r.capexInfraEletricaBRL, () => p.financeiro.capexInfraEletrica?.valorBRL, (v) => (p.financeiro.capexInfraEletrica = valor(v)));
     this.escalar('financeiro.rapAnual', r.rapAnualBRL, () => p.financeiro.rapAnual?.valorBRL, (v) => (p.financeiro.rapAnual = valor(v)));
