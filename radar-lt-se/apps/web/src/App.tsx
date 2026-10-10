@@ -28,7 +28,9 @@ interface Eu {
 /** Metadados da versão publicada (gerados pela coleta automática). */
 interface Publicacao {
   geradoEm: string;
-  coletas: { fonteId: string; fonte: string; status: string; registrosLidos: number; criados: number; atualizados: number; erros: string[] }[];
+  coletas: { fonteId: string; fonte: string; status: string; registrosLidos: number; criados: number; atualizados: number; erros: string[]; ultimaColetaComDados?: string }[];
+  /** Coleta com dados mais recente (a base é desta data). */
+  dadosAtualizadosEm?: string;
   empreendimentos: number;
   incertos?: number;
   possiveisDuplicidades?: number;
@@ -38,19 +40,25 @@ interface Publicacao {
 
 function AvisoPublicacao({ p }: { p: Publicacao }) {
   const falhas = p.coletas.filter((c) => c.status === 'erro');
+  const parciais = p.coletas.filter((c) => c.status === 'parcial');
+  const comDados = p.coletas.filter((c) => c.status !== 'erro');
   return (
     <div className="aviso info" role="note">
-      <strong>Versão publicada — somente consulta.</strong>{' '}
-      {p.demo ? <>{p.empreendimentos} empreendimentos de DEMONSTRAÇÃO (fictícios), gerados em {dataHoraBR(p.geradoEm)}.</> : (
-        <>
-          {p.empreendimentos} empreendimentos de fontes públicas; atualização em {dataHoraBR(p.geradoEm)}
-          {p.coletas.length ? <> ({p.coletas.filter((c) => c.status !== 'erro').map((c) => c.fonte).join('; ') || 'nenhuma fonte respondeu'})</> : ' (sem coleta automática nesta publicação)'}.
-        </>
-      )}
-      {falhas.length > 0 && <> Sem resposta nesta coleta: {falhas.map((c) => c.fonte).join('; ')} — dados anteriores mantidos.</>}
-      {p.portfolioConfigurado === false && <> A prioridade usa um perfil genérico (portfólio da empresa não configurado; critério geográfico neutro).</>}
-      {!!p.possiveisDuplicidades && <> {p.possiveisDuplicidades} par(es) de registros semelhantes podem ser o mesmo empreendimento (<a href="#/qualidade">Qualidade → Possíveis duplicidades</a>); totais podem estar superestimados.</>}
-      {' '}Datas calculadas são estimativas da plataforma, não compromissos dos empreendedores.
+      <strong>Versão publicada — somente consulta.</strong>
+      <div>
+        {p.demo ? <>{p.empreendimentos} empreendimentos de DEMONSTRAÇÃO (fictícios), gerados em {dataHoraBR(p.geradoEm)}.</> : (
+          <>
+            {p.empreendimentos} empreendimentos de fontes públicas
+            {comDados.length ? <>; coletados em {dataHoraBR(p.geradoEm)} ({comDados.map((c) => c.fonte).join('; ')})</> : p.coletas.length ? <>; nenhuma fonte respondeu nesta execução{p.dadosAtualizadosEm ? <> — dados da coleta de {dataHoraBR(p.dadosAtualizadosEm)}</> : null}</> : ' (sem coleta automática nesta publicação)'}.
+          </>
+        )}
+        {falhas.length > 0 && comDados.length > 0 && <> Sem resposta nesta coleta: {falhas.map((c) => `${c.fonte}${c.ultimaColetaComDados ? ` (dados de ${dataHoraBR(c.ultimaColetaComDados)})` : ''}`).join('; ')} — dados anteriores mantidos.</>}
+        {parciais.length > 0 && <> Coleta parcial (parte dos registros rejeitada): {parciais.map((c) => `${c.fonte} — ${c.erros.length} erro(s)`).join('; ')}; detalhes em <a href="#/fontes">Fontes e ingestão</a>.</>}
+        {!!p.incertos && <> {p.incertos} registro(s) desta coleta foram cadastrados como novos sem conferência humana (correspondência incerta com registros existentes).</>}
+        {p.portfolioConfigurado === false && <> A prioridade usa um perfil genérico (portfólio da empresa não configurado; critério geográfico neutro).</>}
+        {!!p.possiveisDuplicidades && <> {p.possiveisDuplicidades} par(es) de registros semelhantes podem ser o mesmo empreendimento (<a href="#/qualidade">Qualidade → Possíveis duplicidades</a>); totais podem estar superestimados.</>}
+        {' '}Datas calculadas são estimativas da plataforma, não compromissos dos empreendedores.
+      </div>
     </div>
   );
 }
@@ -119,7 +127,15 @@ export function App() {
         ))}
         <div className="lateral-rodape">
           {ESTATICO ? (
-            <div>Versão publicada · somente consulta{publicacao && <><br />Dados de {dataHoraBR(publicacao.geradoEm)}</>}</div>
+            <div>
+              Versão publicada · somente consulta
+              {publicacao && (
+                <>
+                  {publicacao.dadosAtualizadosEm && <><br />Dados de {dataHoraBR(publicacao.dadosAtualizadosEm)}</>}
+                  <br />Publicado em {dataHoraBR(publicacao.geradoEm)}
+                </>
+              )}
+            </div>
           ) : (
             <>
               <div>{eu ? `${eu.email ?? eu.nome ?? eu.id} · ${eu.papel}` : '…'}</div>
@@ -145,10 +161,10 @@ export function App() {
             <Route path="/mapa" element={<PaginaMapa />} />
             <Route path="/funil" element={<PaginaFunil />} />
             <Route path="/previsao" element={<PaginaPrevisao />} />
-            <Route path="/clientes" element={<PaginaClientes />} />
+            <Route path="/clientes" element={<PaginaClientes papel={eu?.papel} />} />
             <Route path="/clientes/:id" element={<PaginaClienteFicha />} />
             <Route path="/comercial" element={<PaginaComercial papel={eu?.papel} />} />
-            <Route path="/alertas" element={<PaginaAlertas />} />
+            <Route path="/alertas" element={<PaginaAlertas papel={eu?.papel} />} />
             <Route path="/empreendimentos/:id" element={<PaginaFicha papel={eu?.papel} />} />
             <Route path="/fontes" element={<PaginaFontes papel={eu?.papel} />} />
             <Route path="/qualidade" element={<PaginaQualidade papel={eu?.papel} />} />

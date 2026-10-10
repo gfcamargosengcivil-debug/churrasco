@@ -6,10 +6,11 @@ import {
 } from '@radar/core';
 import { Carregando, Cartao, Erro, Kpi, SeloDemo } from '../componentes/base';
 import { BarrasHorizontais } from '../componentes/graficos';
-import { api, useApi } from '../lib/api';
+import { api, ESTATICO, useApi } from '../lib/api';
 import { brl, dataBR, dataHoraBR, num } from '../lib/formatos';
 
-export function PaginaClientes() {
+export function PaginaClientes({ papel }: { papel?: string }) {
+  const pode = !ESTATICO && papel !== undefined && papel !== 'leitor';
   const { dados, erro, recarregar } = useApi<ResumoCliente[]>('/clientes');
   const [busca, setBusca] = useState('');
   const [tipo, setTipo] = useState('');
@@ -24,7 +25,7 @@ export function PaginaClientes() {
           <h1>Inteligência por cliente</h1>
           <p>Concessionárias, mineradoras, indústrias e demais organizações com empreendimentos mapeados — ordenadas pelo potencial de serviços ainda não contratados.</p>
         </div>
-        <div className="acoes"><button className="botao" onClick={() => setNova(true)}>Nova organização</button></div>
+        {pode && <div className="acoes"><button className="botao" onClick={() => setNova(true)}>Nova organização</button></div>}
       </div>
       {nova && <NovaOrganizacao aoFechar={() => setNova(false)} aoSalvar={() => { setNova(false); recarregar(); }} />}
       <div className="filtros">

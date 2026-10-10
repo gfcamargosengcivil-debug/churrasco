@@ -6,7 +6,7 @@
 import { CONFIG_DEDUP_PADRAO, type ConfigDedup } from '../config/parametros.js';
 import { distanciaKm } from '../geo/index.js';
 import { normalizarNomeOrganizacao, normalizarTexto, similaridadeNomes } from '../normalizacao/index.js';
-import { extensaoTotalKm, pontoRepresentativo, tensaoMaxKv } from '../projetos/derivados.js';
+import { extensaoTotalKm, pontoRepresentativo, tensoesKv } from '../projetos/derivados.js';
 import type { Empreendimento, Identificador, Organizacao } from '../tipos.js';
 import { compararIdentidades, identidadeDoTrecho, identidadesDoNome, type IdentidadeLT } from './identidadeLT.js';
 import type { RegistroNormalizado } from './registro.js';
@@ -46,6 +46,40 @@ function unicas(ids: IdentidadeLT[]): IdentidadeLT[] {
   });
 }
 
+// Identidades calculadas uma vez por objeto (empreendimentos e registros são substituídos, não mutados, ao mesclar).
+const cacheProj = new WeakMap<Empreendimento, { assinatura: string; ids: IdentidadeLT[] }>();
+const cacheReg = new WeakMap<RegistroNormalizado, IdentidadeLT[]>();
+
+/** Identidades de LT de um empreendimento (nome oficial, nomes alternativos e trechos). */
+export function identidadesDoEmpreendimento(p: Empreendimento): IdentidadeLT[] {
+  // Assinatura protege contra edição do objeto no lugar (nome, apelidos ou trechos alterados).
+  const assinatura = `${p.nomeOficial}|${p.nomesAlternativos.length}|${p.trechosLT.map((t) => t.nome).join('|')}`;
+  const c = cacheProj.get(p);
+  if (c?.assinatura === assinatura) return c.ids;
+  const ids = unicas([...[p.nomeOficial, ...p.nomesAlternativos].flatMap(identidadesDoNome), ...p.trechosLT.flatMap(identidadeDoTrecho)]);
+  cacheProj.set(p, { assinatura, ids });
+  return ids;
+}
+
+/** Identidades de LT de um registro (nome, nomes alternativos e trechos). */
+export function identidadesDoRegistro(r: RegistroNormalizado): IdentidadeLT[] {
+  let ids = cacheReg.get(r);
+  if (!ids) {
+    ids = unicas([...[r.nome, ...(r.nomesAlternativos ?? [])].flatMap(identidadesDoNome), ...(r.trechosLT ?? []).flatMap(identidadeDoTrecho)]);
+    cacheReg.set(r, ids);
+  }
+  return ids;
+}
+
+/** Todas as identidades de xs têm correspondente idêntico (extremidades, tensão e circuito) em ys. */
+export const identidadesContidas = (xs: IdentidadeLT[], ys: IdentidadeLT[]) =>
+  xs.length > 0 && xs.every((a) => ys.some((b) => compararIdentidades(a, b) === 'mesma'));
+
+/** Tensões citadas pelo registro (declaradas, dos trechos e das subestações). */
+function tensoesDoRegistro(r: RegistroNormalizado): number[] {
+  return [...new Set([...(r.tensoesKv ?? []), ...(r.trechosLT ?? []).map((t) => t.tensaoKv), ...(r.subestacoes ?? []).flatMap((s) => s.tensoesKv ?? [])])];
+}
+
 export function pontuarCorrespondencia(
   r: RegistroNormalizado,
   p: Empreendimento,
@@ -53,6 +87,13 @@ export function pontuarCorrespondencia(
   cfg: ConfigDedup = CONFIG_DEDUP_PADRAO,
 ): Correspondencia {
   const motivos: string[] = [];
+  const idsProj = new Set(p.identificadores.map(chaveIdentificador));
+  // A chave do item na própria fonte reconhece o mesmo registro em coletas seguintes, mesmo que o
+  // empreendimento tenha acumulado identificadores de outros registros.
+  const chavePropria = r.identificadores?.find((i) => i.tipo === 'chave_fonte' && idsProj.has(chaveIdentificador(i)));
+  if (chavePropria) {
+    return { empreendimentoId: p.id, pontuacao: 1, motivos: [`Mesmo registro da fonte (${chavePropria.valor}).`] };
+  }
   // Identificadores exclusivos diferentes do mesmo tipo provam que são empreendimentos distintos.
   const idConflitante = r.identificadores?.find(
     (i) => TIPOS_EXCLUSIVOS.includes(i.tipo) && p.identificadores.some((x) => x.tipo === i.tipo && chaveIdentificador(x) !== chaveIdentificador(i)),
@@ -61,7 +102,6 @@ export function pontuarCorrespondencia(
     return { empreendimentoId: p.id, pontuacao: 0, motivos: [`Identificadores oficiais distintos do mesmo tipo (${idConflitante.tipo}).`] };
   }
   // Identificador oficial do próprio empreendimento coincidente é decisivo.
-  const idsProj = new Set(p.identificadores.map(chaveIdentificador));
   const comuns = (r.identificadores ?? []).filter((i) => idsProj.has(chaveIdentificador(i)));
   const idDecisivo = comuns.find((i) => TIPOS_DECISIVOS.includes(i.tipo));
   if (idDecisivo) {
@@ -81,8 +121,8 @@ export function pontuarCorrespondencia(
   }
 
   // Identidade estrutural das LTs (extremidades + tensão + circuito).
-  const ltsReg = unicas([...nomesReg.flatMap(identidadesDoNome), ...(r.trechosLT ?? []).flatMap(identidadeDoTrecho)]);
-  const ltsProj = unicas([...nomesProj.flatMap(identidadesDoNome), ...p.trechosLT.flatMap(identidadeDoTrecho)]);
+  const ltsReg = identidadesDoRegistro(r);
+  const ltsProj = identidadesDoEmpreendimento(p);
   let mesma = false;
   let extremidades = false;
   let circuitoDiferente = false;
@@ -94,7 +134,9 @@ export function pontuarCorrespondencia(
       else if (c === 'circuito_diferente') circuitoDiferente = true;
     }
   }
-  const todasIguais = ltsReg.length > 0 && ltsReg.every((a) => ltsProj.some((b) => compararIdentidades(a, b) === 'mesma'));
+  // Contido em qualquer sentido: o registro é parte do empreendimento ou o empreendimento é parte do
+  // registro (ex.: lote de leilão que reúne o empreendimento e outras instalações).
+  const todasIguais = identidadesContidas(ltsReg, ltsProj) || identidadesContidas(ltsProj, ltsReg);
   if (todasIguais) {
     score = Math.max(score + 0.25, 0.9);
     motivos.push('Mesma(s) LT(s): extremidades, tensão e circuito coincidentes.');
@@ -108,17 +150,27 @@ export function pontuarCorrespondencia(
   if (circuitoDiferente && !mesma) {
     score -= 0.35;
     motivos.push('Mesmas extremidades com circuitos diferentes: instalações distintas.');
+  } else if (ltsReg.length && ltsProj.length && !mesma && !extremidades && !circuitoDiferente) {
+    score -= 0.15;
+    motivos.push('LTs com extremidades distintas.');
   }
 
-  const kvReg = r.tensoesKv?.length ? Math.max(...r.tensoesKv) : r.trechosLT?.length ? Math.max(...r.trechosLT.map((t) => t.tensaoKv)) : undefined;
-  const kvProj = tensaoMaxKv(p);
-  if (kvReg !== undefined && kvProj !== undefined) {
-    if (kvReg === kvProj) {
+  // Tensão: a maior tensão de um lado presente no conjunto de tensões do outro (parte × todo,
+  // ex.: SE 500/230 kV × LT 230 kV que chega a ela). LT idêntica dispensa a comparação.
+  const kvsReg = tensoesDoRegistro(r);
+  const kvsProj = tensoesKv(p);
+  if (kvsReg.length && kvsProj.length) {
+    const maxReg = Math.max(...kvsReg);
+    const maxProj = Math.max(...kvsProj);
+    if (maxReg === maxProj) {
       score += 0.15;
-      motivos.push(`Mesma tensão máxima (${kvReg} kV).`);
-    } else {
+      motivos.push(`Mesma tensão máxima (${maxReg} kV).`);
+    } else if (kvsProj.includes(maxReg) || kvsReg.includes(maxProj)) {
+      score += 0.05;
+      motivos.push(`Tensão compatível (${maxReg} × ${maxProj} kV máx.).`);
+    } else if (!mesma) {
       score -= 0.2;
-      motivos.push(`Tensões diferentes (${kvReg} × ${kvProj} kV).`);
+      motivos.push(`Tensões diferentes (${maxReg} × ${maxProj} kV).`);
     }
   }
 
@@ -200,33 +252,52 @@ export function decidirCorrespondencia(
   return { acao: 'novo', candidatos };
 }
 
-/** Possíveis duplicidades já existentes no cadastro (para a tela de qualidade). */
+/** Registro sintético com tudo o que o empreendimento tem, para comparar dois empreendimentos do cadastro. */
+function registroDoEmpreendimento(a: Empreendimento, organizacoes: Map<string, Organizacao>): RegistroNormalizado {
+  return {
+    fonteId: 'interno',
+    nome: a.nomeOficial,
+    nomesAlternativos: a.nomesAlternativos,
+    identificadores: a.identificadores,
+    tensoesKv: tensoesKv(a),
+    extensaoKm: extensaoTotalKm(a),
+    trechosLT: a.trechosLT.map(({ id: _id, evidenciaIds: _ev, ...t }) => t),
+    ufs: a.localizacao.ufs,
+    ponto: pontoRepresentativo(a),
+    organizacoes: a.participantes
+      .map((x) => organizacoes.get(x.organizacaoId))
+      .filter((o): o is Organizacao => !!o)
+      .map((o) => ({ nome: o.nome, cnpj: o.cnpj, papel: 'empreendedor' as const })),
+    evidencia: { titulo: 'interno', tipoDocumento: 'registro_manual' },
+  };
+}
+
+/**
+ * Possíveis duplicidades já existentes no cadastro (para a tela de qualidade). Compara apenas pares
+ * com UF em comum (ou sem UF em um dos lados): sem UF comum a pontuação já é penalizada.
+ */
 export function possiveisDuplicidades(
   projetos: Empreendimento[],
   organizacoes: Map<string, Organizacao>,
   cfg: ConfigDedup = CONFIG_DEDUP_PADRAO,
+  /** Pontuação mínima para listar o par (abaixo disso são, em geral, empreendimentos distintos de nome parecido). */
+  minimo = 0.7,
 ): { a: string; b: string; pontuacao: number; motivos: string[] }[] {
   const res: { a: string; b: string; pontuacao: number; motivos: string[] }[] = [];
+  const limiar = Math.max(minimo, cfg.limiarRevisao);
+  const porUf = new Map<string, number[]>();
+  const semUf: number[] = [];
+  projetos.forEach((p, i) => {
+    if (!p.localizacao.ufs.length) semUf.push(i);
+    for (const uf of p.localizacao.ufs) porUf.set(uf, [...(porUf.get(uf) ?? []), i]);
+  });
   for (let i = 0; i < projetos.length; i++) {
     const a = projetos[i];
-    const regA: RegistroNormalizado = {
-      fonteId: 'interno',
-      nome: a.nomeOficial,
-      nomesAlternativos: a.nomesAlternativos,
-      identificadores: a.identificadores,
-      tensoesKv: tensaoMaxKv(a) ? [tensaoMaxKv(a)!] : undefined,
-      extensaoKm: extensaoTotalKm(a),
-      ufs: a.localizacao.ufs,
-      ponto: pontoRepresentativo(a),
-      organizacoes: a.participantes
-        .map((x) => organizacoes.get(x.organizacaoId))
-        .filter((o): o is Organizacao => !!o)
-        .map((o) => ({ nome: o.nome, cnpj: o.cnpj, papel: 'empreendedor' as const })),
-      evidencia: { titulo: 'interno', tipoDocumento: 'registro_manual' },
-    };
-    for (let j = i + 1; j < projetos.length; j++) {
+    const candidatos = new Set<number>(a.localizacao.ufs.length ? [...a.localizacao.ufs.flatMap((u) => porUf.get(u) ?? []), ...semUf] : projetos.keys());
+    const regA = registroDoEmpreendimento(a, organizacoes);
+    for (const j of [...candidatos].filter((j) => j > i).sort((x, y) => x - y)) {
       const c = pontuarCorrespondencia(regA, projetos[j], organizacoes, cfg);
-      if (c.pontuacao >= cfg.limiarRevisao) res.push({ a: a.id, b: projetos[j].id, pontuacao: c.pontuacao, motivos: c.motivos });
+      if (c.pontuacao >= limiar) res.push({ a: a.id, b: projetos[j].id, pontuacao: c.pontuacao, motivos: c.motivos });
     }
   }
   return res.sort((x, y) => y.pontuacao - x.pontuacao);

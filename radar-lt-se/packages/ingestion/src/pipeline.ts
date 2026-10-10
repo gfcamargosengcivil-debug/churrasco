@@ -4,10 +4,11 @@
  * a persistência é feita pela "porta" implementada na API.
  */
 import {
-  compararIdentidades, identidadeDoTrecho, identidadesDoNome,
+  compararIdentidades, identidadeDoTrecho, identidadesContidas, identidadesDoEmpreendimento, identidadesDoNome, identidadesDoRegistro, identidadesIguais,
+  pontuarCorrespondencia,
   CONFIGURACAO_PADRAO, RegistroNormalizadoSchema, criarEmpreendimentoDeRegistro, decidirCorrespondencia, detectarMudancas,
   mesclarRegistro, novoId, resumoRegistro, type Coleta, type ConfiguracaoPlataforma, type ContextoMescla, type Empreendimento, type EventoMudanca,
-  type Fonte, type MatchCandidato, type Organizacao, type RegistroNormalizado,
+  type Fonte, type IdentidadeLT, type MatchCandidato, type Organizacao, type RegistroNormalizado,
 } from '@radar/core';
 import type { Encerramento, SinalColetado } from './adaptadores/tipos.js';
 
@@ -43,15 +44,27 @@ export interface OpcoesProcessamento {
 
 /**
  * Fontes "complementares" (planejamento, lotes de leilão) ao se ligarem a um empreendimento já
- * documentado por outra fonte só acrescentam o que têm de próprio: identificadores, nomes,
- * evidência, traçado de trechos correspondentes, localização ausente, participantes, marcos de
- * tipos ainda sem registro e — quando o registro corresponde inteiramente ao empreendimento —
- * investimento declarado. Extensão total, tipo e situações não são comparáveis entre parte e todo.
+ * documentado por outra fonte só acrescentam o que têm de próprio: evidência, traçado de trechos
+ * correspondentes, participantes e marcos de tipos ainda sem registro. Nomes, identificadores e
+ * investimento/RAP só quando o registro é exatamente a mesma instalação (mesmas LTs, tensões e
+ * circuitos dos dois lados); UFs e localização só quando o registro é parte do empreendimento.
+ * Extensão total, tipo e situações não são comparáveis entre parte e todo.
+ *
+ * `parcial`: o registro abrange vários empreendimentos (ex.: lote com várias LTs) e é ligado a cada
+ * um deles; os identificadores do registro não são copiados, para não tornar as partes "iguais".
  */
-export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento): RegistroNormalizado {
-  const idsP = [...[p.nomeOficial, ...p.nomesAlternativos].flatMap(identidadesDoNome), ...p.trechosLT.flatMap(identidadeDoTrecho)];
-  const idsR = [...[r.nome, ...(r.nomesAlternativos ?? [])].flatMap(identidadesDoNome), ...(r.trechosLT ?? []).flatMap(identidadeDoTrecho)];
-  const corresponde = idsR.length > 0 && idsR.every((a) => idsP.some((b) => compararIdentidades(a, b) === 'mesma'));
+export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento, opcoes: { parcial?: boolean } = {}): RegistroNormalizado {
+  // Identidades do empreendimento só pelo nome oficial e trechos: apelidos podem ter vindo de complementos.
+  const idsP = [...identidadesDoNome(p.nomeOficial), ...p.trechosLT.flatMap(identidadeDoTrecho)];
+  const idsR = identidadesDoRegistro(r);
+  // Igualdade por circuito ("C1 e C2" = trechos C1 + C2); sem circuito dos dois lados, pelas extremidades.
+  const porCircuito = (ids: IdentidadeLT[]) => ids.flatMap((i) => (i.circuitos.length > 1 ? i.circuitos.map((c) => ({ ...i, circuitos: [c] })) : [i]));
+  const igual = (a: IdentidadeLT, b: IdentidadeLT) =>
+    identidadesIguais(a, b) || (!a.circuitos.length && !b.circuitos.length && compararIdentidades(a, b) === 'mesmas_extremidades');
+  const [cR, cP] = [porCircuito(idsR), porCircuito(idsP)];
+  const exato = !opcoes.parcial && cR.length > 0 && cP.length > 0 && cR.every((a) => cP.some((b) => igual(a, b))) && cP.every((b) => cR.some((a) => igual(a, b)));
+  // Registro sem LT identificada (ex.: subestação) ou com todas as LTs dentro do empreendimento.
+  const parte = !opcoes.parcial && (idsR.length === 0 || identidadesContidas(idsR, idsP));
   const trechos: NonNullable<RegistroNormalizado['trechosLT']> = [];
   for (const t of r.trechosLT ?? []) {
     if (!t.tracado) continue;
@@ -64,19 +77,35 @@ export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento
   return {
     fonteId: r.fonteId,
     chaveExterna: r.chaveExterna,
-    nome: r.nome,
-    nomesAlternativos: r.nomesAlternativos,
-    identificadores: r.identificadores,
+    nome: exato ? r.nome : p.nomeOficial,
+    nomesAlternativos: exato ? r.nomesAlternativos : undefined,
+    identificadores: opcoes.parcial ? undefined : r.identificadores,
     organizacoes: r.organizacoes,
-    ufs: r.ufs,
-    ponto: p.localizacao.ponto ? undefined : r.ponto,
+    ufs: parte || !p.localizacao.ufs.length ? r.ufs : undefined,
+    ponto: parte && !p.localizacao.ponto ? r.ponto : undefined,
     trechosLT: trechos.length ? trechos : undefined,
     marcos: (r.marcos ?? []).filter((m) => !tiposComMarco.has(m.tipo) && !(temEnergizacao && ['energizacao', 'operacao_comercial', 'prazo_contratual_energizacao'].includes(m.tipo))),
-    capexInfraEletricaBRL: corresponde ? r.capexInfraEletricaBRL : undefined,
-    rapAnualBRL: corresponde ? r.rapAnualBRL : undefined,
+    capexInfraEletricaBRL: exato ? r.capexInfraEletricaBRL : undefined,
+    rapAnualBRL: exato ? r.rapAnualBRL : undefined,
+    valoresMonetarios: exato ? r.valoresMonetarios : undefined,
     evidencia: r.evidencia,
     statusDado: r.statusDado,
   };
+}
+
+/**
+ * Empreendimentos que são partes de um registro que abrange várias instalações (todas as LTs do
+ * empreendimento estão no registro, mas não o contrário) e cuja correspondência é plausível.
+ */
+export function partesDoRegistro(r: RegistroNormalizado, projetos: Empreendimento[], organizacoes: Map<string, Organizacao>, cfg: ConfiguracaoPlataforma['dedup']): Empreendimento[] {
+  const idsR = identidadesDoRegistro(r);
+  if (idsR.length < 2) return [];
+  return projetos.filter((p) => {
+    if (p.statusGeral === 'cancelado') return false;
+    const idsP = identidadesDoEmpreendimento(p);
+    if (!identidadesContidas(idsP, idsR) || identidadesContidas(idsR, idsP)) return false;
+    return pontuarCorrespondencia(r, p, organizacoes, cfg).pontuacao >= cfg.limiarAutomatico;
+  });
 }
 
 export async function processarRegistros(registros: RegistroNormalizado[], op: OpcoesProcessamento): Promise<{ coleta: Coleta; eventos: EventoMudanca[]; empreendimentosAfetados: string[] }> {
@@ -90,6 +119,8 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
   const orgMap = new Map(organizacoes.map((o) => [o.id, o]));
   const nomeOrg = (id: string) => orgMap.get(id)?.nome;
   let incertosSemRevisao = 0;
+  let vinculosMultiplos = 0;
+  const complementar = (op.fonte.config as { papelMescla?: string }).papelMescla === 'complementar';
 
   for (const bruto of registros) {
     coleta.registrosLidos++;
@@ -113,6 +144,31 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
     }
     try {
       const ctx: ContextoMescla = { fonte: op.fonte, organizacoes: [...orgMap.values()], por: op.por, origem: op.origem ?? 'ingestao', coletaId: coleta.id, agora, fluxos: cfg.fluxos };
+      // Registro complementar que abrange vários empreendimentos (ex.: lote com várias LTs já
+      // acompanhadas individualmente): liga-se a cada parte, sem criar um empreendimento sobreposto.
+      const partes = !op.vincularA && complementar ? partesDoRegistro(r, projetos, orgMap, cfg.dedup) : [];
+      if (partes.length >= 2) {
+        let mudou = false;
+        for (const parte of partes) {
+          const idx = projetos.findIndex((p) => p.id === parte.id);
+          const res = mesclarRegistro(parte, reduzirParaComplemento(r, parte, { parcial: true }), ctx);
+          projetos[idx] = res.projeto;
+          for (const o of res.organizacoesNovas) {
+            await op.porta.salvarOrganizacao(o);
+            orgMap.set(o.id, o);
+          }
+          await op.porta.salvarEmpreendimento(res.projeto, parte);
+          if (!res.mudou) continue;
+          mudou = true;
+          coleta.conflitos += res.conflitosNovos.length;
+          afetados.add(res.projeto.id);
+          eventos.push(...detectarMudancas(parte, res.projeto, { agora, etapas: cfg.etapas, nomeOrganizacao: nomeOrg }));
+        }
+        if (mudou) coleta.atualizados++;
+        else coleta.semMudanca++;
+        vinculosMultiplos++;
+        continue;
+      }
       const decisao = op.vincularA
         ? { acao: 'vincular' as const, empreendimentoId: op.vincularA, candidatos: [] }
         : decidirCorrespondencia(r, projetos, orgMap, cfg.dedup);
@@ -139,8 +195,7 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
         if (idx < 0) throw new Error(`Empreendimento ${decisao.empreendimentoId} não encontrado`);
         antes = projetos[idx];
         const outraFonte = antes.evidencias.some((e) => e.fonteId !== op.fonte.id);
-        const complementar = (op.fonte.config as { papelMescla?: string }).papelMescla === 'complementar' && outraFonte;
-        resultado = mesclarRegistro(antes, complementar ? reduzirParaComplemento(r, antes) : r, ctx);
+        resultado = mesclarRegistro(antes, complementar && outraFonte ? reduzirParaComplemento(r, antes) : r, ctx);
         if (!resultado.mudou) {
           // Mesmo sem mudança de dados, a confirmação (última confirmação da evidência) é registrada.
           await op.porta.salvarEmpreendimento(resultado.projeto, antes);
@@ -166,6 +221,9 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
     } catch (e) {
       coleta.erros.push(`"${r.nome}": ${(e as Error).message}`);
     }
+  }
+  if (vinculosMultiplos) {
+    coleta.avisos.push(`${vinculosMultiplos} registro(s) abrangendo vários empreendimentos já acompanhados vinculado(s) a cada parte (sem investimento atribuído).`);
   }
   if (incertosSemRevisao) {
     coleta.avisos.push(`${incertosSemRevisao} registro(s) com correspondência incerta cadastrados como novos (execução sem revisor) — conferir em Qualidade → Possíveis duplicidades.`);

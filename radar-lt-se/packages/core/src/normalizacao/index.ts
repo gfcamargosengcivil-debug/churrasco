@@ -202,7 +202,8 @@ export function extrairTensoesKv(texto: string | number | null | undefined): num
     const valores = [m[1], ...(m[2] ? m[2].split(/[\/-]/).map((x) => x.trim()).filter(Boolean) : [])];
     for (const v of valores) {
       const n = normalizarNumero(v);
-      if (n && n >= 1 && n <= 1200) res.add(n);
+      // Maior tensão do SIN: ±800 kVCC; acima disso é código de equipamento ("KODM 1153-15 / 13,8KV").
+      if (n && n >= 1 && n <= 800) res.add(n);
     }
   }
   return [...res].sort((a, b) => b - a);

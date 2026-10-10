@@ -5,14 +5,18 @@ import {
   type EventoMudanca, type Organizacao, type TipoEvento,
 } from '@radar/core';
 import { Carregando, Cartao, Erro } from '../componentes/base';
-import { api, useApi } from '../lib/api';
+import { api, ESTATICO, useApi } from '../lib/api';
 import { dataHoraBR } from '../lib/formatos';
 import type { Resumo } from '../lib/tipos';
 
 type Notif = AlertaNotificacao & { evento?: EventoMudanca; regra?: string };
 type EventoComNome = EventoMudanca & { empreendimento?: string };
 
-export function PaginaAlertas() {
+export function PaginaAlertas({ papel }: { papel?: string }) {
+  // Versão publicada / papel de consulta: sem ações de escrita.
+  const pode = !ESTATICO && papel !== undefined && papel !== 'leitor';
+  const [msg, setMsg] = useState<string>();
+  const avisarErro = (e: unknown) => setMsg((e as Error).message);
   const { dados: notifs, erro, recarregar } = useApi<Notif[]>('/alertas/notificacoes');
   const { dados: regras, recarregar: recRegras } = useApi<AlertaRegra[]>('/alertas/regras');
   const { dados: eventos } = useApi<EventoComNome[]>('/eventos?limite=300');
@@ -21,8 +25,12 @@ export function PaginaAlertas() {
   if (erro) return <Erro mensagem={erro} tentar={recarregar} />;
   if (!notifs || !regras) return <Carregando />;
   const marcar = async (n: Notif, lido: boolean) => {
-    await api.enviar('POST', `/alertas/notificacoes/${n.id}/lida`, { lido });
-    recarregar();
+    try {
+      await api.enviar('POST', `/alertas/notificacoes/${n.id}/lida`, { lido });
+      recarregar();
+    } catch (e) {
+      avisarErro(e);
+    }
   };
   const naoLidas = notifs.filter((n) => !n.lido);
   return (
@@ -32,11 +40,12 @@ export function PaginaAlertas() {
           <h1>Monitoramento e alertas</h1>
           <p>Mudanças relevantes detectadas nas coletas e edições (novos empreendimentos, editais, leilões, vencedores, concessões, licenças, revisões de cronograma, cotações, suspensões, atrasos e cancelamentos) e as regras que geram alertas.</p>
         </div>
-        <div className="acoes"><button className="botao primario" onClick={() => setEditando('nova')}>Nova regra</button></div>
+        {pode && <div className="acoes"><button className="botao primario" onClick={() => setEditando('nova')}>Nova regra</button></div>}
       </div>
+      {msg && <div className="aviso erro">{msg}</div>}
       {editando && <EditorRegra regra={editando === 'nova' ? undefined : editando} aoFechar={() => setEditando(undefined)} aoSalvar={() => { setEditando(undefined); recRegras(); recarregar(); }} />}
       <div className="grade g2">
-        <Cartao titulo={`Alertas (${naoLidas.length} não lidos)`} acoes={naoLidas.length ? <button className="botao peq" onClick={() => void Promise.all(naoLidas.map((n) => api.enviar('POST', `/alertas/notificacoes/${n.id}/lida`, { lido: true }))).then(recarregar)}>Marcar todos como lidos</button> : undefined}>
+        <Cartao titulo={`Alertas (${naoLidas.length} não lidos)`} acoes={pode && naoLidas.length ? <button className="botao peq" onClick={() => void Promise.all(naoLidas.map((n) => api.enviar('POST', `/alertas/notificacoes/${n.id}/lida`, { lido: true }))).then(recarregar, avisarErro)}>Marcar todos como lidos</button> : undefined}>
           <div className="lista">
             {notifs.slice(0, 80).map((n) => (
               <div className="item" key={n.id} style={{ opacity: n.lido ? 0.6 : 1 }}>
@@ -45,7 +54,7 @@ export function PaginaAlertas() {
                   {n.evento ? <Link to={`/empreendimentos/${n.empreendimentoId}`}>{n.evento.titulo}</Link> : n.eventoId}
                   <div className="meta">{n.evento?.descricao} · regra “{n.regra}” · {dataHoraBR(n.criadoEm)} · {n.canal}{!n.entregue && n.erroEntrega ? ` · não entregue: ${n.erroEntrega}` : ''}</div>
                 </div>
-                <button className="botao peq" onClick={() => void marcar(n, !n.lido)}>{n.lido ? 'Não lido' : 'Lido'}</button>
+                {pode && <button className="botao peq" onClick={() => void marcar(n, !n.lido)}>{n.lido ? 'Não lido' : 'Lido'}</button>}
               </div>
             ))}
             {!notifs.length && <div className="vazio">Nenhum alerta. Crie regras para ser avisado.</div>}
@@ -59,8 +68,8 @@ export function PaginaAlertas() {
                   <strong>{r.nome}</strong> {!r.ativo && <span className="selo">inativa</span>}
                   <div className="meta">{descreverFiltros(r)}</div>
                 </div>
-                <button className="botao peq" onClick={() => setEditando(r)}>Editar</button>
-                <button className="botao peq perigo" onClick={() => void api.enviar('DELETE', `/alertas/regras/${r.id}`).then(recRegras)}>Excluir</button>
+                {pode && <button className="botao peq" onClick={() => setEditando(r)}>Editar</button>}
+                {pode && <button className="botao peq perigo" onClick={() => void api.enviar('DELETE', `/alertas/regras/${r.id}`).then(recRegras, avisarErro)}>Excluir</button>}
               </div>
             ))}
             {!regras.length && <div className="vazio">Nenhuma regra.</div>}

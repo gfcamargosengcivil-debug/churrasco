@@ -152,6 +152,69 @@ describe('pipeline de ingestão', () => {
     expect(p.identificadores).toContainEqual(expect.objectContaining({ tipo: 'chave_fonte', valor: 'epe-webmap|epe:lt:alfa' }));
   });
 
+  it('lote que abrange vários empreendimentos se liga a cada parte, sem nomes, identificadores nem investimento', async () => {
+    const porta = new PortaMemoria();
+    const siget = (n: number, nome: string, o: string, d: string) => ({
+      fonteId: 'aneel-siget', chaveExterna: `siget:${n}`, nome, tipo: 'LT' as const, tensoesKv: [230], ufs: ['BA' as const],
+      trechosLT: [{ nome, tensaoKv: 230, corrente: 'CA' as const, origem: o, destino: d }],
+      evidencia: { titulo: `SIGET ${n}`, tipoDocumento: 'planilha' as const },
+    });
+    await processarRegistros([siget(1, 'LT 230 kV Alfa - Beta, C1', 'ALFA', 'BETA'), siget(2, 'LT 230 kV Beta - Gama, C1', 'BETA', 'GAMA')], {
+      porta, fonte: fonte('aneel-siget'), coleta: novaColeta('aneel-siget', 'agendado'), por: 't',
+    });
+    const lote = {
+      fonteId: 'aneel-leiloes-transmissao', chaveExterna: 'leilao:1/2024:3', nome: 'LT 230 kV Alfa - Beta, C1; LT 230 kV Beta - Gama, C1', tensoesKv: [230], ufs: ['BA' as const],
+      identificadores: [{ tipo: 'aneel_leilao_lote' as const, valor: '1/2024-L3' }],
+      capexInfraEletricaBRL: 500_000_000, valoresMonetarios: { natureza: 'estimado' as const, dataBase: '2024-03-28' },
+      marcos: [{ tipo: 'leilao_realizado' as const, data: '2024-03-28', natureza: 'realizado' as const }],
+      evidencia: { titulo: 'Resultado do leilão 1/2024', tipoDocumento: 'planilha' as const },
+    };
+    const exec = () => processarRegistros([lote], { porta, fonte: fonte('aneel-leiloes-transmissao'), coleta: novaColeta('aneel-leiloes-transmissao', 'agendado'), por: 't', semRevisaoManual: true });
+    const r = await exec();
+    expect(r.coleta, JSON.stringify(r.coleta)).toMatchObject({ criados: 0, atualizados: 1 });
+    expect(r.coleta.avisos.join(' ')).toContain('vinculado(s) a cada parte');
+    expect(porta.projetos).toHaveLength(2);
+    for (const p of porta.projetos) {
+      expect(p.evidencias.map((e) => e.titulo)).toContain('Resultado do leilão 1/2024');
+      expect(p.marcos.map((m) => m.tipo)).toContain('leilao_realizado');
+      expect(p.nomesAlternativos).toEqual([]);
+      expect(p.identificadores.some((i) => i.tipo === 'aneel_leilao_lote')).toBe(false);
+      expect(p.financeiro.capexInfraEletrica).toBeUndefined();
+    }
+    // Recoleta: mesmo resultado, sem criar nada.
+    const r2 = await exec();
+    expect(r2.coleta).toMatchObject({ criados: 0, semMudanca: 1 });
+    expect(porta.projetos).toHaveLength(2);
+  });
+
+  it('complemento só atribui investimento e nome quando é exatamente a mesma instalação', async () => {
+    const porta = new PortaMemoria();
+    const siget = {
+      fonteId: 'aneel-siget', chaveExterna: 'siget:5', nome: 'LT 500 kV Delta - Épsilon, C1 e C2', tipo: 'LT' as const, tensoesKv: [500], ufs: ['GO' as const],
+      trechosLT: [
+        { nome: 'LT 500 kV Delta - Épsilon, C1', tensaoKv: 500, corrente: 'CA' as const, origem: 'DELTA', destino: 'EPSILON' },
+        { nome: 'LT 500 kV Delta - Épsilon, C2', tensaoKv: 500, corrente: 'CA' as const, origem: 'DELTA', destino: 'EPSILON' },
+      ],
+      evidencia: { titulo: 'SIGET 5', tipoDocumento: 'planilha' as const },
+    };
+    await processarRegistros([siget], { porta, fonte: fonte('aneel-siget'), coleta: novaColeta('aneel-siget', 'agendado'), por: 't' });
+    // Lote com só o C1: parte do empreendimento → sem investimento e sem novo nome.
+    const parcial = {
+      fonteId: 'aneel-leiloes-transmissao', chaveExterna: 'leilao:x', nome: 'LT 500 kV Delta - Epsilon, C1', tensoesKv: [500], ufs: ['GO' as const],
+      capexInfraEletricaBRL: 300_000_000, valoresMonetarios: { natureza: 'estimado' as const },
+      evidencia: { titulo: 'Leilão X', tipoDocumento: 'planilha' as const },
+    };
+    await processarRegistros([parcial], { porta, fonte: fonte('aneel-leiloes-transmissao'), coleta: novaColeta('aneel-leiloes-transmissao', 'agendado'), por: 't', semRevisaoManual: true });
+    expect(porta.projetos).toHaveLength(1);
+    expect(porta.projetos[0].financeiro.capexInfraEletrica).toBeUndefined();
+    expect(porta.projetos[0].nomesAlternativos).toEqual([]);
+    // Lote com C1 e C2: mesma instalação → investimento de referência atribuído como estimativa.
+    const exato = { ...parcial, chaveExterna: 'leilao:y', nome: 'LT 500 kV Delta - Epsilon, C1 e C2', evidencia: { titulo: 'Leilão Y', tipoDocumento: 'planilha' as const } };
+    await processarRegistros([exato], { porta, fonte: fonte('aneel-leiloes-transmissao'), coleta: novaColeta('aneel-leiloes-transmissao', 'agendado'), por: 't', semRevisaoManual: true });
+    expect(porta.projetos).toHaveLength(1);
+    expect(porta.projetos[0].financeiro.capexInfraEletrica).toMatchObject({ valorBRL: 300_000_000, natureza: 'estimado' });
+  });
+
   it('encerramento informado pela fonte conclui o empreendimento acompanhado (sem criar outros)', async () => {
     const porta = new PortaMemoria();
     const reg = { fonteId: 'aneel-siget', chaveExterna: 'siget:9', nome: 'Reforço na SE Teste: 2º ATF 500/230 kV', tensoesKv: [500], ufs: ['SP' as const], evidencia: { titulo: 'SIGET', tipoDocumento: 'planilha' as const } };

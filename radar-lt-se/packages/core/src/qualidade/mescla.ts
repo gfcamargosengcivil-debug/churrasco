@@ -497,10 +497,15 @@ class Mesclador {
 
     // Financeiro (valores declarados pela fonte)
     const vm = r.valoresMonetarios;
-    const valor = (v: number) => ({ valorBRL: v, natureza: vm?.natureza ?? ('declarado' as const), dataBase: vm?.dataBase ?? this.evidencia.dataPublicacao, observacao: vm?.observacao });
-    this.escalar('financeiro.capexTotal', r.capexTotalBRL, () => p.financeiro.capexTotal?.valorBRL, (v) => (p.financeiro.capexTotal = valor(v)));
-    this.escalar('financeiro.capexInfraEletrica', r.capexInfraEletricaBRL, () => p.financeiro.capexInfraEletrica?.valorBRL, (v) => (p.financeiro.capexInfraEletrica = valor(v)));
-    this.escalar('financeiro.rapAnual', r.rapAnualBRL, () => p.financeiro.rapAnual?.valorBRL, (v) => (p.financeiro.rapAnual = valor(v)));
+    const valor = (q: { natureza: 'declarado' | 'estimado'; dataBase?: string; observacao?: string } | undefined) => (v: number) => ({
+      valorBRL: v,
+      natureza: q?.natureza ?? ('declarado' as const),
+      dataBase: q?.dataBase ?? this.evidencia.dataPublicacao,
+      observacao: q?.observacao,
+    });
+    this.escalar('financeiro.capexTotal', r.capexTotalBRL, () => p.financeiro.capexTotal?.valorBRL, (v) => (p.financeiro.capexTotal = valor(vm)(v)));
+    this.escalar('financeiro.capexInfraEletrica', r.capexInfraEletricaBRL, () => p.financeiro.capexInfraEletrica?.valorBRL, (v) => (p.financeiro.capexInfraEletrica = valor(vm)(v)));
+    this.escalar('financeiro.rapAnual', r.rapAnualBRL, () => p.financeiro.rapAnual?.valorBRL, (v) => (p.financeiro.rapAnual = valor(vm?.rap)(v)));
     this.escalar('financeiro.fonteFinanciamento', r.fonteFinanciamento, () => p.financeiro.fonteFinanciamento, (v) => (p.financeiro.fonteFinanciamento = v));
 
     // Situações

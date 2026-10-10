@@ -11,7 +11,7 @@
  * Datas estimadas pela plataforma são sempre marcadas como `previsto_estimado`.
  */
 import {
-  extrairTensoesKv, normalizarData, normalizarNumero, normalizarTexto, somarMeses, UFS,
+  extrairTensoesKv, identidadesDoNome, normalizarData, normalizarExtremidade, normalizarNumero, normalizarTexto, somarMeses, UFS,
   type Fonte, type RegistroNormalizado, type UF as Uf,
 } from '@radar/core';
 import { carregarIndiceSE, localizarPorSubestacao } from './epe.js';
@@ -88,17 +88,31 @@ export function ufsDoModulo(nome: string): Uf[] {
   return m ? m[1].split('/').filter(ehUf) : [];
 }
 
+/** Padrão que casa a palavra sem diferenciar maiúsculas ("*" no fim = qualquer terminação). */
+const semCaixa = (w: string) =>
+  w.replace(/\*$/, '').replace(/[A-Za-zÀ-ÿ]/g, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`) + (w.endsWith('*') ? String.raw`\S*` : '');
+const PALAVRAS_FIM_SE = [
+  'Seccionamento*', 'Secc', 'Seccionadora*', 'Instala*', 'Implanta*', 'Substitui*', 'Amplia*', 'Adequa*', 'Refor*', 'Melhoria*', 'LT', 'LTs',
+  'Banco*', 'Reator*', 'Transforma*', 'Autotransforma*', 'Compensa*', 'Módulo*', 'Modulo*', 'Entrada*', 'Conex*', 'Interliga*', 'Trecho*',
+  'Setor*', 'Barramento*', 'Recapacita*', 'Recondut*', 'Reencabe*', 'Renomea*', 'Capacitor*', 'Disjunt*', 'Remanej*', 'Desativa*',
+].map(semCaixa).join('|');
+const ARTIGOS_FIM_SE = ['para', 'com', 'e', 'em', 'ao', 'à', 'via', 'pelo', 'pela', 'o', 'a', 'os', 'as', 'um', 'uma', 'no', 'na', 'nos', 'nas'].map(semCaixa).join('|');
+const PREPOSICOES_SE = ['de', 'do', 'da', 'dos', 'das'].map(semCaixa).join('|');
+
 /** Nomes de SE citados em textos oficiais ("Reforço na SE X: ...", "SE 500/138 kV X – ...", "a SE X e o ..."). */
 export function subestacoesCitadas(t: string): string[] {
   const nomes = new Map<string, string>();
-  // O nome termina em pontuação, tensão, preposição seguida de número, artigo, conjunção ou em
-  // palavra-chave de obra (Seccionamento, Instalação, LT, Banco...).
-  const fim = String.raw`(?=\s*(?:[:;,()–.]|-|\s\d+(?:[.,]\d+)?\s*kV\b|\s(?:para|com|e|em|ao|à|via|pelo|pela|o|a|os|as|um|uma|no|na|nos|nas)\s|\s(?:de|do|da)\s+\d|\s(?:Seccionamento|Secc|Instala\S*|Implanta\S*|Substitui\S*|Amplia\S*|Adequa\S*|Refor\S*|Melhoria|LTs?|Banco|Reator\S*|Transforma\S*|Autotransforma\S*|Compensa\S*|M[óo]dulo\S*|Entrada|Conex\S*|Interliga\S*|Trecho\S*|Novo|Nova|Setor|Barramento|Recapacita\S*|Recondut\S*)\b|$))`;
+  // Palavra-chave colada ao nome na fonte ("Itararé IISubstituição do TR5").
+  const txt = t.replace(/(\S)(?=(?:Substitui|Seccion|Instala|Implanta|Amplia|Reencabe|Adequa|Refor[cç]o|Desativa)\S)/g, '$1 ');
+  // O nome termina em pontuação, tensão, artigo/conjunção, preposição seguida de número ou de
+  // palavra-chave de obra, ou na própria palavra-chave (Seccionamento, Instalação, LT, Banco...).
+  const fim = String.raw`(?=\s*(?:[:;,()–.]|-|\s\d+(?:[.,]\d+)?\s*[kK][vV]\b|\s(?:${ARTIGOS_FIM_SE})\s|\s(?:${PREPOSICOES_SE})\s+(?:\d|(?:${PALAVRAS_FIM_SE})\b)|\s(?:${PALAVRAS_FIM_SE})\b|\s(?:Novo|Nova|NOVO|NOVA)\s+(?:SE|${semCaixa('setor')}|${semCaixa('pátio')}|${semCaixa('patio')}|${semCaixa('barramento')})\b|$))`;
   const re = new RegExp(String.raw`\bSE\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*\s*kV\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .'ºª°]*?)${fim}`, 'g');
-  for (const m of t.matchAll(re)) {
+  for (const m of txt.matchAll(re)) {
     const n = m[1].trim().replace(/\s+/g, ' ').replace(/\.$/, '');
     if (n.length < 3 || /^(nova|novas|existente|associada|seccionadora)s?$/i.test(n)) continue;
-    const k = normalizarTexto(n);
+    // "Cuiabá Norte" = "CuiabáNorte" (grafias da fonte).
+    const k = normalizarTexto(n).replace(/[^a-z0-9]/g, '');
     if (!nomes.has(k)) nomes.set(k, n);
   }
   return [...nomes.values()];
@@ -139,9 +153,21 @@ export function registroSiget(
   const tiposObra = new Set(linhas.map((l) => texto(l.DscTipObr)));
   const textoEpd = `${nome} ${descricaoEpd}`;
   const contextoSecc = /seccion/i.test(textoEpd);
-  const seSecc = new Set(
-    [...textoEpd.matchAll(/seccion\w*[^.;]*?\b(?:na|em)\s+SE\s+([A-Za-zÀ-ÿ0-9 ]+?)(?=[.,;(]|\s[-–]\s|$)/gi)].map((m) => normalizarTexto(m[1])),
-  );
+  // LTs seccionadas citadas ("seccionamento da LT A - B na SE C") e as SEs de seccionamento.
+  const seccs = identidadesDoNome(textoEpd).filter((i) => i.tipo === 'secc');
+  const seSecc = new Set([
+    ...[...textoEpd.matchAll(/seccion\w*[^.;]*?\b(?:na|em)\s+SE\s+([A-Za-zÀ-ÿ0-9 ]+?)(?=[.,;(]|\s[-–]\s|$)/gi)].map((m) => normalizarExtremidade(m[1])),
+    ...seccs.flatMap((i) => (i.se ? [i.se] : [])),
+  ].filter(Boolean));
+  const contem = (x: string, y: string) => !!x && !!y && (x === y || x.includes(y) || y.includes(x));
+  const ehSESecc = (x: string) => [...seSecc].some((s) => contem(x, s));
+  /** Circuito resultante: liga a SE de seccionamento a uma das extremidades da LT seccionada. */
+  const resultanteDe = (origem: string, destino: string, kv: number) => {
+    const [x, y] = [normalizarExtremidade(origem), normalizarExtremidade(destino)];
+    if (seccs.length) return seccs.some((s) => [s.a, s.b].some((e) => (contem(e, x) && ehSESecc(y)) || (contem(e, y) && ehSESecc(x))));
+    // Sem a LT seccionada identificada: basta tocar a SE de seccionamento (LT em corrente contínua não é seccionada).
+    return kv !== 600 && kv !== 800 && (ehSESecc(x) || ehSESecc(y));
+  };
   // Módulos gerais/infraestrutura/entrada de linha levam a tensão principal da SE ou da LT remota,
   // não a da obra: não entram na tensão do empreendimento.
   const moduloContexto = (nomeMdl: string, sig: string) => sig === 'MG' || /^(MG|IB|EL|MIM|MI|INS)\b/.test(nomeMdl);
@@ -175,9 +201,7 @@ export function registroSiget(
     const destino = texto(lt?.NomSubestacaoDestino);
     // Circuitos resultantes de seccionamento: o módulo tem a extensão da linha resultante (quase toda
     // existente), não do trecho construído.
-    const resultanteSecc =
-      /seccion|originad|resultante/i.test(dscObr) ||
-      (contextoSecc && [origem, destino].some((x) => x && [...seSecc].some((s) => normalizarTexto(x).includes(s) || s.includes(normalizarTexto(x)))));
+    const resultanteSecc = /seccion|originad|resultante/i.test(dscObr) || (contextoSecc && !!origem && !!destino && resultanteDe(origem, destino, kv));
     const kmModulo = numero(lt?.NumEtnLinTms);
     const kmObra = /(\d+(?:[.,]\d+)?)\s*km\b/i.exec(dscObr)?.[1];
     let km: number | undefined;
@@ -190,7 +214,8 @@ export function registroSiget(
       // Nome do módulo traz o circuito ("C-1"): distingue circuitos da mesma LT.
       nome: nomeMdl,
       tensaoKv: kv,
-      corrente: /\bcc\b|±|bipolo|hvdc|kvcc/i.test(`${nomeMdl} ${textoEpd}`) || kv === 600 || kv === 800 ? 'CC' : 'CA',
+      // Corrente pelo próprio módulo: empreendimento de bipolo também tem circuitos CA.
+      corrente: /\bcc\b|±|bipolo|hvdc|kvcc/i.test(nomeMdl) || kv === 600 || kv === 800 ? 'CC' : 'CA',
       extensaoKm: km,
       circuitos: numero(lt?.NumCcuLinTms) ? Math.round(numero(lt?.NumCcuLinTms)!) : undefined,
       origem: origem || undefined,
@@ -204,22 +229,49 @@ export function registroSiget(
   const reforco = /refor[cç]o|melhoria/i.test(textoEpd);
   const ses = subestacoesCitadas(textoEpd);
   const novaSE = (!reforco && /^(SEs?|Subesta)/i.test(nome)) || /\b(nova\s+(?:SE|subesta)|SE\s+nova|implanta[çc][ãa]o\s+da\s+SE)/i.test(textoEpd);
-  const kvs = [...tensoes].filter((k) => k > 0).sort((a, b) => b - a);
+  // SE listada como item do nome ("LT A - B e SE C", "...; SE C") em empreendimento que não é reforço: SE nova.
+  const itemDoNome = (se: string) =>
+    !reforco && new RegExp(String.raw`(?:^|[;,–-]\s*|\be\s+)SEs?\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*\s*kV\s+)?${se.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(nome);
+  // Tensão da obra: quando o nome do empreendimento cita tensões, nada acima delas (e das LTs da obra)
+  // — o texto descritivo e os módulos costumam citar a tensão principal da SE existente.
+  const kvNome = extrairTensoesKv(nome);
+  const teto = kvNome.length ? Math.max(...kvNome, ...trechos.map((t) => t.tensaoKv)) : Infinity;
+  const kvs = [...tensoes].filter((k) => k > 0 && k <= teto).sort((a, b) => b - a);
   const subestacoes: NonNullable<RegistroNormalizado['subestacoes']> = kvs.length
-    ? ses.map((s) => ({ nome: `SE ${s}`, natureza: novaSE ? 'nova' : 'ampliacao', tensoesKv: kvs }))
+    ? ses.map((s) => ({ nome: `SE ${s}`, natureza: novaSE || itemDoNome(s) ? 'nova' : 'ampliacao', tensoesKv: kvs }))
     : [];
 
   // Contrato do escopo: o da resolução (quando houver); senão, o mais frequente entre os módulos que
   // não são circuitos resultantes de seccionamento (esses ficam no contrato do dono da LT seccionada).
+  // Contrato do escopo: o da resolução (quando houver); senão, o dos módulos de LT (a LT é da
+  // transmissora do empreendimento; módulos nas SEs das pontas ficam nos contratos dos donos das SEs);
+  // senão, o mais frequente. Circuitos resultantes de seccionamento ficam no contrato do dono da LT seccionada.
   const rea = ctx.resolucoes.get(ide);
-  const freq = new Map<string, number>();
-  for (const l of linhas) {
-    if (/seccion|originad|resultante/i.test(texto(l.DscObr))) continue;
-    const k = texto(l.IdeCcd);
-    if (k) freq.set(k, (freq.get(k) ?? 0) + 1);
+  const naoSecc = linhas.filter((l) => !/seccion|originad|resultante/i.test(texto(l.DscObr)));
+  const moda = (ls: Linha[]) => {
+    const freq = new Map<string, number>();
+    for (const l of ls) {
+      const k = texto(l.IdeCcd);
+      if (k) freq.set(k, (freq.get(k) ?? 0) + 1);
+    }
+    return [...freq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  };
+  const ccds = [...new Set(naoSecc.map((l) => texto(l.IdeCcd)).filter(Boolean))];
+  let criterioCcd = 'contrato da resolução autorizativa';
+  let ideCcd = texto(rea?.IdeCcd);
+  if (!ideCcd) {
+    ideCcd = moda(naoSecc.filter((l) => texto(l.SigTipMdl) === 'LT')) ?? '';
+    criterioCcd = 'contrato dos módulos de LT';
   }
-  const ideCcd = texto(rea?.IdeCcd) || [...freq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || texto(l0.IdeCcd);
+  if (!ideCcd) {
+    ideCcd = moda(naoSecc) || texto(l0.IdeCcd);
+    criterioCcd = 'contrato mais frequente entre os módulos';
+  }
   const contrato = ctx.contratos.get(ideCcd);
+  const notaContratos =
+    ccds.length > 1
+      ? `Módulos vinculados a ${ccds.length} contratos (${ccds.map((k) => texto(ctx.contratos.get(k)?.NumCnaCcd) || k).join(', ')}); concessionária atribuída pelo ${criterioCcd} — verificar.`
+      : '';
   const marcos: NonNullable<RegistroNormalizado['marcos']> = [];
   const identificadores: NonNullable<RegistroNormalizado['identificadores']> = [{ tipo: 'aneel_siget_empreendimento', valor: ide }];
   const onsEpd = texto(l0.IdeOnsEpd);
@@ -264,6 +316,7 @@ export function registroSiget(
     efetiva && !concluidoSiget ? `Operação comercial efetiva registrada em ${efetiva} com o empreendimento ainda "${situacao}" (operação parcial).` : '',
     obras.length ? `Obras (${obras.length}): ${obras.slice(0, 6).join(' | ')}${obras.length > 6 ? ' …' : ''}` : '',
     rea && texto(rea.DscLink) ? `Ato: ${texto(rea.DscLink)}` : '',
+    notaContratos,
   ].filter(Boolean).join('\n');
 
   const trecho = [
@@ -275,7 +328,7 @@ export function registroSiget(
     `DatOprComEpd=${texto(l0.DatOprComEpd) || '∅'}`,
     `DatEfeOprComEpd=${texto(l0.DatEfeOprComEpd) || '∅'}`,
     rea && `[Resolução Contrato Agente] CodReg=${texto(rea.CodReg)}; DatAssDoc=${texto(rea.DatAssDoc).slice(0, 10)}; DatPubDoc=${texto(rea.DatPubDoc).slice(0, 10)}; DscLink=${texto(rea.DscLink)}`,
-    contrato && `[Contrato Agente] IdeCcd=${ideCcd}; NumCnaCcd=${texto(contrato.NumCnaCcd)}; DatAsnCcd=${texto(contrato.DatAsnCcd)}; DscRazaoSocial="${texto(contrato.DscRazaoSocial)}"; NumCNPJ=${texto(contrato.NumCNPJ)}`,
+    contrato && `[Contrato Agente] (${criterioCcd}) IdeCcd=${ideCcd}; NumCnaCcd=${texto(contrato.NumCnaCcd)}; DatAsnCcd=${texto(contrato.DatAsnCcd)}; DscRazaoSocial="${texto(contrato.DscRazaoSocial)}"; NumCNPJ=${texto(contrato.NumCNPJ)}`,
     detalheLT.length && `[Módulos LT] ${detalheLT.join(' | ')}`,
   ].filter(Boolean).join('; ');
 
@@ -450,7 +503,12 @@ export function registroLeilao(l: Linha, ctx: { fonte: Fonte; hoje: string; url:
     capexInfraEletricaBRL: numero(l.VlrInvestimentoPrevisto),
     rapAnualBRL: numero(l.VlrRAPVencedorLeilao),
     // Investimento previsto pela ANEEL é estimativa de referência do edital (preços da época do leilão).
-    valoresMonetarios: { natureza: 'estimado', dataBase: dataLeilao, observacao: 'investimento previsto pela ANEEL para o lote (referência do edital)' },
+    valoresMonetarios: {
+      natureza: 'estimado',
+      dataBase: dataLeilao,
+      observacao: 'investimento previsto pela ANEEL para o lote (referência do edital)',
+      rap: { natureza: 'declarado', dataBase: dataLeilao, observacao: 'RAP vencedora do leilão' },
+    },
     marcos,
     situacoes: { regulatoria: 'outorgada' },
     // O conjunto não informa o andamento: o status não é afirmado por esta fonte.

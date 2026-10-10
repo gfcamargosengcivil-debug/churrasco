@@ -13,6 +13,8 @@ interface RespostaQualidade {
   matchesPendentes: (Omit<MatchCandidato, 'candidatos'> & { candidatos: (MatchCandidato['candidatos'][number] & { nome?: string })[] })[];
 }
 
+const LIMITE_DUPLICIDADES = 300;
+
 export function PaginaQualidade({ papel }: { papel?: string }) {
   const { dados, erro, recarregar } = useApi<RespostaQualidade>('/qualidade');
   const [msg, setMsg] = useState<string>();
@@ -87,9 +89,12 @@ export function PaginaQualidade({ papel }: { papel?: string }) {
             {!dados.conflitos.length && <div className="vazio">Nenhum conflito aberto.</div>}
           </div>
         </Cartao>
-        <Cartao titulo={`Possíveis duplicidades (${dados.duplicidades.length})`} sub="Pares de empreendimentos do cadastro com alta similaridade">
-          <div className="lista">
-            {dados.duplicidades.slice(0, 30).map((d) => (
+        <Cartao
+          titulo={`Possíveis duplicidades (${dados.duplicidades.length})`}
+          sub={`Pares de empreendimentos do cadastro com alta similaridade${dados.duplicidades.length > LIMITE_DUPLICIDADES ? ` — exibindo os ${LIMITE_DUPLICIDADES} de maior pontuação de ${dados.duplicidades.length}` : ''}`}
+        >
+          <div className="lista" style={{ maxHeight: 640, overflowY: 'auto' }}>
+            {dados.duplicidades.slice(0, LIMITE_DUPLICIDADES).map((d) => (
               <div className="item" key={`${d.a}-${d.b}`}>
                 <span className="selo">{Math.round(d.pontuacao * 100)}%</span>
                 <div><Link to={`/empreendimentos/${d.a}`}>{d.nomeA}</Link> × <Link to={`/empreendimentos/${d.b}`}>{d.nomeB}</Link><div className="meta">{d.motivos.join(' ')}</div></div>

@@ -104,6 +104,12 @@ describe('ANEEL SIGET', () => {
     expect(ufsDoModulo('LT 230 kV PICOS /TAUA II C-1 PI/CE')).toEqual(['PI', 'CE']);
     expect(ufsDoModulo('TR 230/138 kV IBICOARA TR3 BA')).toEqual(['BA']);
     expect(subestacoesCitadas('Reforço na SE IBICOARA: Instalação do 3° ATF 230/138 kV')).toEqual(['IBICOARA']);
+    // Resíduos reais apontados na revisão: caixa alta, palavra colada, preposição + palavra-chave.
+    expect(subestacoesCitadas('Reforço na SE São Luis II DO BANCO DE CAPACITORES')).toEqual(['São Luis II']);
+    expect(subestacoesCitadas('Reforço na SE Itararé IISubstituição do TR5')).toEqual(['Itararé II']);
+    expect(subestacoesCitadas('SE Nova Ponte 3 Seccionamento da LT')).toEqual(['Nova Ponte 3']);
+    expect(subestacoesCitadas('Reforço na SE Ponte Nova: 2º TR 345/138 kV')).toEqual(['Ponte Nova']);
+    expect(subestacoesCitadas('SE CuiabáNorte; SE Cuiabá Norte')).toHaveLength(1);
   });
 });
 
@@ -169,12 +175,16 @@ describe('EPE WebMap', () => {
     expect(r.organizacoes).toBeUndefined();
   });
 
-  it('feições repetidas do mesmo seccionamento viram um registro com dois trechos', () => {
+  it('feição repetida na camada (mesma geometria, caso real) conta uma vez; pernas distintas viram trechos', () => {
     const { registros } = registrosLT([SECC_A, SECC_B], ctx);
     expect(registros).toHaveLength(1);
-    expect(registros[0].trechosLT).toHaveLength(2);
-    expect(new Set(registros[0].trechosLT!.map((t) => t.nome)).size).toBe(2);
-    expect(registros[0].extensaoKm).toBeCloseTo(30.4, 1);
+    expect(registros[0].trechosLT).toHaveLength(1);
+    expect(registros[0].extensaoKm).toBeCloseTo(15.2, 1);
+    expect(registros[0].descricao).toContain('repetida');
+    const perna2: FeicaoEpe = { ...SECC_B, geometry: { type: 'LineString', coordinates: [[-55.1132, -21.6827], [-55.0, -21.6]] } };
+    const r2 = registrosLT([SECC_A, perna2], ctx).registros[0];
+    expect(r2.trechosLT).toHaveLength(2);
+    expect(new Set(r2.trechosLT!.map((t) => t.nome)).size).toBe(2);
   });
 
   it('UF pelo código IBGE quando a sigla da camada diverge (caso real: Bahia gravada como "BH")', () => {

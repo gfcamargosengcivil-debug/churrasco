@@ -171,19 +171,28 @@ empreendedor +0,15; localização ≤ 60 km +0,10 (> 180 km −0,15); extensão 
 abaixo cria novo empreendimento.
 
 **Identidade estrutural de LT.** Uma LT é identificada por extremidades + tensão + circuito
-(seccionamentos: LT seccionada + SE de seccionamento). Mesmas extremidades, tensão e circuito em
-todas as LTs do registro → correspondência forte (≥ 0,86, prevalece sobre diferenças de localização e
-extensão indicativas); mesmas extremidades com circuitos diferentes → instalações distintas (−0,35).
+(seccionamentos: LT seccionada + SE de seccionamento). Extremidades são comparadas pelo nome canônico
+(sem acentos, prefixo "SE", apelido entre parênteses e UF; numeração romana convertida); tolerância de
+grafia só quando a numeração coincide ("Juazeiro II" ≠ "Juazeiro III"). Mesmas extremidades, tensão e
+circuito em todas as LTs de um dos lados → correspondência forte (≥ 0,86, prevalece sobre diferenças
+de localização e extensão indicativas); mesmas extremidades com circuitos diferentes → instalações
+distintas (−0,35); LTs com extremidades distintas → −0,15. A tensão é comparada com o conjunto de
+tensões do empreendimento (uma LT 230 kV de um empreendimento 500/230 kV é compatível).
 Identificadores exclusivos (código SIGET, código ONS, lote de leilão, CEG) diferentes provam que são
 empreendimentos distintos; contrato de concessão e REA são compartilhados por vários empreendimentos
-e apenas somam pontos. A chave do item na fonte é guardada para reconhecer o mesmo item nas coletas
-seguintes.
+e apenas somam pontos. A chave do item na fonte é guardada e reconhece o mesmo item nas coletas
+seguintes (prevalece sobre os demais identificadores).
 
 **Fontes complementares.** Planejamento (EPE) e lotes de leilão, ao se ligarem a um empreendimento
-já documentado por outra fonte, só acrescentam traçado de trechos correspondentes, identificadores,
-nomes, participantes, marcos de tipos ainda ausentes e — quando o registro corresponde inteiramente ao
-empreendimento — o investimento declarado; extensão total, tipo e situações não são comparados entre
-parte e todo. O tipo combina escopos (LT + SE = LT+SE) sem gerar conflito.
+já documentado por outra fonte, só acrescentam evidência, traçado de trechos correspondentes,
+participantes e marcos de tipos ainda ausentes. Nomes, identificadores e investimento/RAP só quando o
+registro é exatamente a mesma instalação (mesmas LTs, tensões e circuitos dos dois lados, pelo nome
+oficial e trechos do empreendimento); UFs e localização só quando o registro é parte do empreendimento.
+Um lote que abrange vários empreendimentos já acompanhados (todas as LTs de cada um estão no lote) é
+ligado a cada parte, sem investimento atribuído e sem criar cadastro sobreposto. Extensão total, tipo e
+situações não são comparados entre parte e todo; o tipo combina escopos (LT + SE = LT+SE) sem conflito.
+O investimento previsto pela ANEEL no edital é gravado como **estimativa** (data-base = data do leilão);
+a RAP vencedora, como valor declarado.
 
 **Execução sem revisor** (publicação automática): correspondências incertas (0,55–0,85) viram
 empreendimentos novos em vez de ficarem pendentes; os pares semelhantes aparecem em Qualidade →
@@ -206,10 +215,17 @@ sempre como **inferidas**.
 | | `DatOprComEpd` | data de operação comercial registrada (divulgada), quando difere do prazo |
 | | `DatEfeOprComEpd` | operação comercial realizada |
 | | Resolução (REA): `DatPubDoc`/`DatAssDoc`, `DscLink` | autorização publicada (realizado), link do ato |
-| | Contrato: `DatAsnCcd`, razão social | outorga (só se compatível com o prazo do escopo), concessionária |
+| | Contrato: `DatAsnCcd`, razão social | outorga (só se compatível com o prazo do escopo), concessionária (contrato da REA → dos módulos de LT → mais frequente; módulos em vários contratos geram nota "verificar") |
+| | Nome (`NomEpd`) e módulos | tensões da obra (nada acima das tensões citadas no nome; módulos gerais MG/IB/EL excluídos); SEs citadas (nova quando o nome as lista como item) |
 | | Módulos LT: origem/destino, `NumEtnLinTms`, circuitos | trechos; extensão só de obras de instalação |
-| ANEEL leilões de transmissão | data, lote, `QtdPrazoConstrucaoMeses`, km, MVA, `VlrInvestimentoPrevisto`, vencedor | leilão realizado, investimento elétrico declarado, energização **estimada** (leilão + premissa + prazo do edital, rotulada) |
-| EPE WebMap | nome, ano previsto, tensão, extensão, geometria | inclusão em plano, energização divulgada (precisão anual, 31/12), traçado aproximado, UF pela geometria; extensão validada contra o traçado |
+| ANEEL leilões de transmissão | data, lote, `QtdPrazoConstrucaoMeses`, km, MVA, `VlrInvestimentoPrevisto`, `VlrRAPVencedorLeilao`, vencedor | leilão realizado, investimento de referência (**estimativa** do edital), RAP vencedora (declarada), energização **estimada** (leilão + premissa + prazo do edital, rotulada); lotes com energização estimada há mais de 12 meses não são coletados; o status não é afirmado pela fonte |
+| EPE WebMap | nome, ano previsto, tensão, extensão, geometria | inclusão em plano, energização **estimada** a partir do ano (01/07 do ano, precisão anual — não é data divulgada), traçado aproximado, UF pela geometria (código IBGE); extensão validada contra o traçado; feições repetidas contadas uma vez |
 | EPE WebMap (SEs) | nome + UF | localização de obras sem coordenadas pela SE homônima (inequívoca; existente = precisão "subestação", planejada = "aproximada") |
 
 `VlrHisRct` (receita do contrato) não é usado como investimento.
+
+**Encerramento.** Empreendimentos do SIGET que saem do conjunto ativo (operação registrada, revogação)
+são encerrados pela própria fonte. Empreendimentos conhecidos só pela EPE ou só por lote de leilão não
+têm encerramento informado por essas fontes: permanecem com a situação padrão ("ativo", não afirmada
+pela fonte) e perdem confirmação recente quando deixam de aparecer na coleta (indicador "dias sem
+confirmação" em Qualidade).

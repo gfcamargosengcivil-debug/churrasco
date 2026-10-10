@@ -36,10 +36,18 @@ export const RegistroNormalizadoSchema = z.object({
   capexInfraEletricaBRL: z.number().nonnegative().optional(),
   rapAnualBRL: z.number().nonnegative().optional(),
   /**
-   * Como os valores monetários do registro devem ser lidos: "declarado" pelo empreendedor ou
-   * "estimado" por terceiro (ex.: investimento de referência da ANEEL no edital), com data-base de preço.
+   * Como os valores de investimento (capex) do registro devem ser lidos: "declarado" pelo empreendedor
+   * ou "estimado" por terceiro (ex.: investimento de referência da ANEEL no edital), com data-base de
+   * preço. `rap` qualifica a RAP separadamente (ex.: RAP vencedora do leilão é declarada).
    */
-  valoresMonetarios: z.object({ natureza: z.enum(['declarado', 'estimado']), dataBase: DataISO.optional(), observacao: z.string().optional() }).optional(),
+  valoresMonetarios: z
+    .object({
+      natureza: z.enum(['declarado', 'estimado']),
+      dataBase: DataISO.optional(),
+      observacao: z.string().optional(),
+      rap: z.object({ natureza: z.enum(['declarado', 'estimado']), dataBase: DataISO.optional(), observacao: z.string().optional() }).optional(),
+    })
+    .optional(),
   fonteFinanciamento: z.string().optional(),
   marcos: z
     .array(

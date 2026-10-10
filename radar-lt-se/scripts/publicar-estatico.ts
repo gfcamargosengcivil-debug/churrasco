@@ -106,6 +106,14 @@ for (const c of [
   ...['otimista', 'base', 'conservador'].map((c) => `/demanda?cenario=${c}&meses=36`),
 ]) await exportar(c);
 
+// Última coleta com dados (sucesso ou parcial) de cada fonte, incluindo execuções anteriores.
+const historico = ((await app.inject('/api/coletas')).json() ?? []) as { fonteId: string; status: string; finalizadaEm?: string }[];
+const ultimaColeta = new Map<string, string>();
+for (const c of historico) {
+  if (!c.finalizadaEm || !['sucesso', 'parcial'].includes(c.status)) continue;
+  if ((ultimaColeta.get(c.fonteId) ?? '') < c.finalizadaEm) ultimaColeta.set(c.fonteId, c.finalizadaEm);
+}
+
 const lista = (await exportar('/empreendimentos')) as { id: string }[] | undefined;
 for (const v of lista ?? []) {
   await exportar(`/empreendimentos/${v.id}`);
@@ -121,7 +129,9 @@ const incertos = coletas.reduce((t, c) => t + c.avisos.reduce((u, a) => u + Numb
 await exportar('/publicacao', {
   geradoEm: new Date().toISOString(),
   hoje: hojeISO(),
-  coletas: coletas.map(({ avisos: _a, ...c }) => c),
+  coletas: coletas.map(({ avisos: _a, ...c }) => ({ ...c, ultimaColetaComDados: ultimaColeta.get(c.fonteId) })),
+  /** Data da coleta com dados mais recente entre as fontes publicadas (a base é desta data, não de geradoEm). */
+  dadosAtualizadosEm: [...ultimaColeta.values()].sort().at(-1),
   empreendimentos: lista?.length ?? 0,
   /** Registros desta coleta cadastrados como novos por correspondência incerta (sem revisor). */
   incertos,

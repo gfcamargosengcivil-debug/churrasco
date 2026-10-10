@@ -6,7 +6,7 @@ import {
 } from '@radar/core';
 import type { ResultadoAnaliseDocumental } from '@radar/ai';
 import { Abas, Carregando, Cartao, Erro } from '../componentes/base';
-import { api, useApi } from '../lib/api';
+import { api, ESTATICO, useApi } from '../lib/api';
 import { dataBR, dataHoraBR } from '../lib/formatos';
 import type { Resumo } from '../lib/tipos';
 
@@ -153,7 +153,7 @@ function Importar({ fontes, pode, aoImportar }: { fontes: FonteApi[]; pode: bool
       setOcupado(false);
     }
   };
-  if (!pode) return <div className="aviso info">Seu papel permite apenas consulta. A importação é feita por analistas.</div>;
+  if (!pode) return <div className="aviso info">{ESTATICO ? 'Versão publicada somente para consulta: a importação de planilhas está disponível na instalação da plataforma.' : 'Seu papel permite apenas consulta. A importação é feita por analistas.'}</div>;
   return (
     <div className="grade g2">
       <Cartao titulo="1. Selecionar arquivo e fonte" sub="CSV (; ou ,) ou XLSX. Cada linha precisa do documento de origem (coluna fonte_titulo).">

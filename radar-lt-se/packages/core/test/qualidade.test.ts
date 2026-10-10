@@ -63,6 +63,27 @@ describe('deduplicação', () => {
     expect(decidirCorrespondencia(registro({ nome: 'SECC LT 230 kV Milagres - Banabuiú, C2, na SE Icó', ufs: ['CE'] }), [seccIco], orgs).acao).toBe('vincular');
   });
 
+  it('chave da própria fonte prevalece sobre identificador exclusivo divergente', () => {
+    const q = projeto({
+      nomeOficial: 'Reforço na SE Delta',
+      identificadores: [{ tipo: 'ons_empreendimento', valor: '10' }, { tipo: 'chave_fonte', valor: 'aneel-siget|siget:7' }],
+    });
+    const c = pontuarCorrespondencia(registro({ nome: 'Reforço na SE Delta', identificadores: [{ tipo: 'ons_empreendimento', valor: '11' }, { tipo: 'chave_fonte', valor: 'aneel-siget|siget:7' }] }), q, orgs);
+    expect(c.pontuacao).toBe(1);
+  });
+
+  it('LT componente de empreendimento multi-tensão não é penalizada pela tensão máxima', () => {
+    const multi = projeto({
+      nomeOficial: 'SE 500/230 kV Zebu III e LT 230 kV Zebu II - Zebu III, C1',
+      trechosLT: [{ id: 't', nome: 'LT 230 kV ZEBU II /ZEBU III C-1', tensaoKv: 230, corrente: 'CA', origem: 'ZEBU II', destino: 'ZEBU III', evidenciaIds: [] }],
+      subestacoes: [{ id: 's', nome: 'SE Zebu III', natureza: 'nova', tensoesKv: [500, 230], evidenciaIds: [] }],
+      localizacao: { ufs: ['AL'], municipios: [] },
+    });
+    const c = pontuarCorrespondencia(registro({ nome: 'LT 230 kV Zebu II - Zebu III, C1', tensoesKv: [230], ufs: ['AL'] }), multi, orgs);
+    expect(c.motivos.join(' ')).not.toContain('Tensões diferentes');
+    expect(c.pontuacao).toBeGreaterThanOrEqual(0.86);
+  });
+
   it('nome + UF + tensão + empreendedor vinculam automaticamente', () => {
     const d = decidirCorrespondencia(
       registro({ nome: 'Linha de Transmissão Beta - Alfa', tensoesKv: [500], ufs: ['BA'], extensaoKm: 205, organizacoes: [{ nome: 'TRANSMISSORA EXEMPLO SA', papel: 'concessionaria' }] }),

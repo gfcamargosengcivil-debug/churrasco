@@ -20,16 +20,23 @@ export interface IdentidadeLT {
 
 const UF_MIN = new Set(UFS.map((u) => u.toLowerCase()));
 
-/** Normaliza o nome de uma extremidade: sem acentos, sem prefixo "SE", sem sufixo de UF e sem pontuação. */
+const ROMANOS: Record<string, string> = { i: '1', ii: '2', iii: '3', iv: '4', v: '5', vi: '6', vii: '7', viii: '8', ix: '9', x: '10' };
+
+/**
+ * Normaliza o nome de uma extremidade: sem acentos, sem prefixo "SE", sem apelido entre parênteses,
+ * sem sufixo de UF, sem pontuação e com numeração romana convertida ("Juazeiro II" = "Juazeiro 2").
+ */
 export function normalizarExtremidade(s: string): string {
   let t = normalizarTexto(s)
+    .replace(/\([^)]*\)/g, ' ')
     .replace(/\b(se|sub|subestacao|ute|uhe|usina)\s+/g, '')
     .replace(/[^a-z0-9 ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   const partes = t.split(' ');
   while (partes.length > 1 && UF_MIN.has(partes[partes.length - 1])) partes.pop();
-  t = partes.join(' ');
+  // Algarismos romanos só como último token ou seguidos de outro token numérico (evita "V" de nomes).
+  t = partes.map((p, i) => (i > 0 && ROMANOS[p] ? ROMANOS[p] : p)).join(' ');
   return t;
 }
 
@@ -41,18 +48,25 @@ function circuitosDe(t: string): number[] {
 
 /** Identidades de LT citadas em um nome/descrição ("LT 500 kV A – B C1", "SECC LT 230 kV A - B, C1, na SE C", "LT A–B–C"). */
 export function identidadesDoNome(nome: string): IdentidadeLT[] {
-  const bruto = normalizarTexto(nome).replace(/[–—]/g, '-').replace(/±\s*/g, '');
+  const bruto = normalizarTexto(nome)
+    .replace(/[–—]/g, '-')
+    .replace(/±\s*/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    // Separador de itens em listas oficiais: hífen colado ao texto anterior ("..., CS- LT 500 kV ...").
+    .replace(/(\S)-\s+(?=(?:lt|se|secc|seccionamento)\b)/g, '$1; ');
+  // "SE X e seccionamento(s) da(s) LT(s) A - B": a SE do seccionamento vem antes.
+  const seAntes = /\bse\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+)*\s*kv\s+)?([a-z0-9 ]+?)\s+e\s+(?:o\s+)?secc/.exec(bruto)?.[1];
   const out: IdentidadeLT[] = [];
-  // Cada ocorrência de "LT ..." até um delimitador forte.
-  for (const m of bruto.matchAll(/\b(secc(?:ionamento)?\s+(?:da\s+)?)?lts?['’]?s?\s+((?:\d+(?:[.,]\d+)?\s*kv(?:cc)?\s*)?)([^;|]*?)(?=;|\||\s-\s*(?:lt|se)\b|$)/g)) {
-    const secc = !!m[1];
+  for (const m of bruto.matchAll(/\b(secc(?:ionamentos?)?\s+(?:d[aeo]s?\s+)?)?lts?['’]?s?\s+((?:\d+(?:[.,]\d+)?\s*kv(?:cc)?\s*)?)([^;|]*?)(?=;|\||$)/g)) {
+    const secc = !!m[1] || (!!seAntes && /secc/.test(bruto.slice(0, m.index ?? 0)));
     const kv = extrairTensoesKv(m[2] || m[3])[0];
     const resto = m[3];
     const circuitos = circuitosDe(resto);
-    const se = secc ? /\b(?:na|em)\s+(?:se|subestacao)\s+([a-z0-9 ]+?)\s*(?:[,.;(]|$|\s-\s)/.exec(resto)?.[1] : undefined;
-    // Trecho das extremidades: até vírgula, parêntese, circuito, "na SE", "com N km", "CS/CD".
+    const seResto = /\b(?:na|em)\s+(?:se|subestacao)\s+([a-z0-9 ]+?)\s*(?:[,.;(]|$|\s-\s)/.exec(resto)?.[1];
+    const se = secc ? seResto ?? seAntes : undefined;
+    // Trecho das extremidades: até vírgula, circuito, "na SE", "com N km", "CS/CD", "e SE/LT".
     const ext = resto
-      .split(/,|\(|\bc\s*-?\s*\d|\bna\s+se\b|\bem\s+se\b|\bcom\s+\d|\b(?:cs|cd)\b|\be\s+(?:se|lt|bipolos?|subesta\w*|instala\w*)\b/)[0]
+      .split(/,|\bc\s*-?\s*\d|\bna\s+se\b|\bem\s+se\b|\bcom\s+\d|\b(?:cs|cd)\b|\be\s+(?:se|lt|bipolos?|subesta\w*|instala\w*)\b/)[0]
       .replace(/\d+(?:[.,]\d+)?\s*kv\b/g, ' ')
       .trim();
     const partes = ext.split(/\s+-\s+|\s*\/\s*|-(?=[a-z])/).map(normalizarExtremidade).filter((p) => p.length >= 3);
@@ -75,9 +89,16 @@ export function identidadeDoTrecho(t: { nome: string; tensaoKv?: number; origem?
   return identidadesDoNome(t.nome).map((i) => ({ ...i, kv: i.kv ?? t.tensaoKv }));
 }
 
-const mesmaExtremidade = (x: string, y: string) => x === y || similaridadeBigramas(x, y) >= 0.9;
+const numeros = (x: string) => (x.match(/\d+/g) ?? []).join(',');
+/** Mesma SE: nomes canônicos iguais; tolerância de grafia só quando a numeração coincide ("Juazeiro 2" ≠ "Juazeiro 3"). */
+const mesmaExtremidade = (x: string, y: string) => x === y || (numeros(x) === numeros(y) && similaridadeBigramas(x, y) >= 0.92);
 
 export type ComparacaoLT = 'mesma' | 'mesmas_extremidades' | 'circuito_diferente' | 'sem_relacao';
+
+/** Igualdade exata (inclui o conjunto de circuitos): usada para atribuir valores de um registro a outro. */
+export function identidadesIguais(r: IdentidadeLT, p: IdentidadeLT): boolean {
+  return compararIdentidades(r, p) === 'mesma' && r.circuitos.join(',') === p.circuitos.join(',');
+}
 
 export function compararIdentidades(r: IdentidadeLT, p: IdentidadeLT): ComparacaoLT {
   if (r.tipo !== p.tipo) return 'sem_relacao';

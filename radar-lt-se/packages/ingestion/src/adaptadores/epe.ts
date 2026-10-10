@@ -179,6 +179,11 @@ function marcosDoAno(ano: number | undefined): RegistroNormalizado['marcos'] {
 }
 
 /** Agrupa feições de LT com o mesmo nome/ano/tensão (trechos do mesmo seccionamento) em um registro. */
+function linhasDe(f: FeicaoEpe): [number, number][][] {
+  const geo = f.geometry;
+  return (geo?.type === 'LineString' ? [geo.coordinates] : geo?.type === 'MultiLineString' ? geo.coordinates : []) as [number, number][][];
+}
+
 export function registrosLT(feicoes: FeicaoEpe[], ctx: ContextoEpe): { registros: RegistroNormalizado[]; avisos: string[] } {
   const grupos = new Map<string, FeicaoEpe[]>();
   const avisos: string[] = [];
@@ -192,8 +197,8 @@ export function registrosLT(feicoes: FeicaoEpe[], ctx: ContextoEpe): { registros
     grupos.set(k, [...(grupos.get(k) ?? []), f]);
   }
   const registros: RegistroNormalizado[] = [];
-  for (const g of grupos.values()) {
-    const p = g[0].properties;
+  for (const grupo of grupos.values()) {
+    const p = grupo[0].properties;
     const nome = texto(p.Nome);
     const kv = tensoesDe(p.Tensao)[0];
     if (!kv) {
@@ -205,9 +210,17 @@ export function registrosLT(feicoes: FeicaoEpe[], ctx: ContextoEpe): { registros
     const ufs = new Set<UF>();
     const notas: string[] = [];
     let km = 0;
+    // Feições repetidas na camada (mesma geometria) contam uma vez só.
+    const geometrias = new Set<string>();
+    const g = grupo.filter((f) => {
+      const a = JSON.stringify(linhasDe(f).map((c) => c.map(([x, y]) => [Math.round(x * 1e5), Math.round(y * 1e5)])));
+      if (geometrias.has(a)) return false;
+      geometrias.add(a);
+      return true;
+    });
+    if (g.length < grupo.length) notas.push(`${grupo.length - g.length} feição(ões) repetida(s) na camada desconsiderada(s)`);
     for (const f of g) {
-      const geo = f.geometry;
-      const linhas = geo?.type === 'LineString' ? [geo.coordinates] : geo?.type === 'MultiLineString' ? geo.coordinates : [];
+      const linhas = linhasDe(f);
       const geoKm = linhas.reduce((t, c) => t + comprimentoKm(c), 0);
       const v = extensaoValidada(normalizarNumero(texto(f.properties.Extensao)), geoKm);
       const ext = v.km;
