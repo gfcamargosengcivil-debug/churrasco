@@ -1,0 +1,10 @@
+{
+  "_comentario": "Configuração da versão publicada (GitHub Pages). Sem portfólio da empresa configurado: critério geográfico neutro (sem UFs prioritárias nem bases). Para refletir a empresa, preencha ufsAtuacao, ufsPrioritarias, bases, porte e capacidade e mude 'configurado' para true.",
+  "configurado": false,
+  "portfolio": {
+    "nome": "Perfil genérico (portfólio da empresa não configurado)",
+    "ufsAtuacao": [],
+    "ufsPrioritarias": [],
+    "bases": []
+  }
+}

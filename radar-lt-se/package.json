@@ -1,0 +1,43 @@
+{
+  "name": "radar-lt-se",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Plataforma de inteligência comercial para obras de LT e SE >= 138 kV",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @radar/api & npm run dev -w @radar/web",
+    "dev:api": "npm run dev -w @radar/api",
+    "dev:web": "npm run dev -w @radar/web",
+    "worker": "npm run worker -w @radar/api",
+    "db:migrate": "npm run db:migrate -w @radar/api",
+    "db:seed-demo": "npm run db:seed-demo -w @radar/api",
+    "build": "npm run build -w @radar/web && npm run build -w @radar/api",
+    "start": "npm run start -w @radar/api",
+    "typecheck": "tsc -p packages/core && tsc -p packages/ingestion && tsc -p packages/ai && tsc -p apps/api && tsc -p apps/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "docs:fontes": "tsx scripts/gerar-doc-fontes.ts",
+    "test:ui": "node scripts/smoke-ui.mjs",
+    "publicar:dados": "tsx scripts/publicar-estatico.ts",
+    "publicar:web": "VITE_ESTATICO=1 npm run build -w @radar/web"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "~5.6.3",
+    "vitest": "^5.0.3",
+    "tsx": "^4.19.2",
+    "playwright-core": "1.56.1"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
+  }
+}

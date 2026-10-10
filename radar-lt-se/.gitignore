@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-estatico/
+.env
+.env.*
+!.env.example
+**/data/*.json
+!**/data/.gitkeep
+*.log
+coverage/
+test-results/
+playwright-report/

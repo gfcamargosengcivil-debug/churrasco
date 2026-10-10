@@ -1,0 +1,36 @@
+{
+  "name": "@radar/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/server.ts",
+    "start": "node dist/server.js",
+    "build": "node scripts/build.mjs",
+    "worker": "tsx src/worker.ts",
+    "db:migrate": "tsx src/db/migrar.ts",
+    "db:seed-demo": "tsx src/db/semear-demo.ts",
+    "worker:prod": "node dist/worker.js",
+    "db:migrate:prod": "node dist/migrar.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.1",
+    "@fastify/multipart": "^10.1.3",
+    "@fastify/static": "^10.1.6",
+    "@radar/ai": "0.1.0",
+    "@radar/core": "0.1.0",
+    "@radar/ingestion": "0.1.0",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.2.1",
+    "jose": "^5.9.6",
+    "pg": "^8.13.1",
+    "zod": "^3.25.0",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "esbuild": "^0.28.2",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.2"
+  }
+}
