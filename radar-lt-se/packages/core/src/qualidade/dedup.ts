@@ -8,6 +8,7 @@ import { distanciaKm } from '../geo/index.js';
 import { normalizarNomeOrganizacao, normalizarTexto, similaridadeNomes } from '../normalizacao/index.js';
 import { extensaoTotalKm, pontoRepresentativo, tensaoMaxKv } from '../projetos/derivados.js';
 import type { Empreendimento, Identificador, Organizacao } from '../tipos.js';
+import { compararIdentidades, identidadeDoTrecho, identidadesDoNome, type IdentidadeLT } from './identidadeLT.js';
 import type { RegistroNormalizado } from './registro.js';
 
 export interface Correspondencia {
@@ -34,6 +35,16 @@ const TIPOS_EXCLUSIVOS: Identificador['tipo'][] = ['aneel_siget_empreendimento',
 const TIPOS_DECISIVOS: Identificador['tipo'][] = [...TIPOS_EXCLUSIVOS, 'chave_fonte', 'licenca_ambiental', 'processo_ambiental', 'interno'];
 
 const chaveIdentificador = (i: Pick<Identificador, 'tipo' | 'valor'>) => `${i.tipo}:${normalizarTexto(i.valor).replace(/[^a-z0-9]/g, '')}`;
+
+function unicas(ids: IdentidadeLT[]): IdentidadeLT[] {
+  const vistas = new Set<string>();
+  return ids.filter((i) => {
+    const k = `${i.tipo}|${i.kv ?? ''}|${i.a}|${i.b}|${i.circuitos.join(',')}|${i.se ?? ''}`;
+    if (vistas.has(k)) return false;
+    vistas.add(k);
+    return true;
+  });
+}
 
 export function pontuarCorrespondencia(
   r: RegistroNormalizado,
@@ -67,6 +78,36 @@ export function pontuarCorrespondencia(
   if (comuns.length) {
     score += 0.1;
     motivos.push(`Identificador compartilhado (${comuns.map((i) => `${i.tipo}: ${i.valor}`).join(', ')}) — pode abranger vários empreendimentos.`);
+  }
+
+  // Identidade estrutural das LTs (extremidades + tensão + circuito).
+  const ltsReg = unicas([...nomesReg.flatMap(identidadesDoNome), ...(r.trechosLT ?? []).flatMap(identidadeDoTrecho)]);
+  const ltsProj = unicas([...nomesProj.flatMap(identidadesDoNome), ...p.trechosLT.flatMap(identidadeDoTrecho)]);
+  let mesma = false;
+  let extremidades = false;
+  let circuitoDiferente = false;
+  for (const a of ltsReg) {
+    for (const b of ltsProj) {
+      const c = compararIdentidades(a, b);
+      if (c === 'mesma') mesma = true;
+      else if (c === 'mesmas_extremidades') extremidades = true;
+      else if (c === 'circuito_diferente') circuitoDiferente = true;
+    }
+  }
+  const todasIguais = ltsReg.length > 0 && ltsReg.every((a) => ltsProj.some((b) => compararIdentidades(a, b) === 'mesma'));
+  if (todasIguais) {
+    score = Math.max(score + 0.25, 0.9);
+    motivos.push('Mesma(s) LT(s): extremidades, tensão e circuito coincidentes.');
+  } else if (mesma) {
+    score += 0.2;
+    motivos.push('Ao menos uma LT idêntica (extremidades, tensão e circuito).');
+  } else if (extremidades) {
+    score += 0.1;
+    motivos.push('Mesmas extremidades e tensão de LT (circuito não informado em um dos lados).');
+  }
+  if (circuitoDiferente && !mesma) {
+    score -= 0.35;
+    motivos.push('Mesmas extremidades com circuitos diferentes: instalações distintas.');
   }
 
   const kvReg = r.tensoesKv?.length ? Math.max(...r.tensoesKv) : r.trechosLT?.length ? Math.max(...r.trechosLT.map((t) => t.tensaoKv)) : undefined;
@@ -131,6 +172,11 @@ export function pontuarCorrespondencia(
     }
   }
 
+  // Identidade estrutural forte prevalece sobre diferenças de localização/extensão (geometrias e
+  // extensões de planejamento são indicativas), mas não sobre tensão ou UF incompatíveis.
+  if (todasIguais && !circuitoDiferente && !motivos.some((m) => m.startsWith('Tensões diferentes') || m === 'Nenhuma UF em comum.')) {
+    score = Math.max(score, 0.86);
+  }
   return { empreendimentoId: p.id, pontuacao: Math.max(0, Math.min(1, Math.round(score * 1000) / 1000)), motivos };
 }
 

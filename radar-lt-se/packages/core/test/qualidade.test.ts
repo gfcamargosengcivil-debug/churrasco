@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  criarEmpreendimentoDeRegistro, decidirCorrespondencia, mesclarRegistro, resolverConflito, type Organizacao,
+  criarEmpreendimentoDeRegistro, decidirCorrespondencia, mesclarRegistro, pontuarCorrespondencia, resolverConflito, type Organizacao,
   type RegistroNormalizado,
 } from '../src/index.js';
 import { fonte, marco, projeto } from './fabrica.js';
@@ -48,6 +48,19 @@ describe('deduplicação', () => {
     expect(d.candidatos[0]?.motivos[0] ?? 'Identificadores oficiais distintos').toContain('distintos');
     const mesmo = registro({ nome: 'qualquer', identificadores: [{ tipo: 'chave_fonte', valor: 'siget|100' }, { tipo: 'aneel_siget_empreendimento', valor: '100' }] });
     expect(decidirCorrespondencia(mesmo, [reforco], orgs).acao).toBe('vincular');
+  });
+
+  it('identidade estrutural de LT: mesmo circuito vincula; circuito ou SE de seccionamento diferentes separam', () => {
+    const lt = (nome: string, extra: Partial<Parameters<typeof projeto>[0]> = {}) => projeto({ nomeOficial: nome, localizacao: { ufs: ['BA', 'ES'], municipios: [] }, ...extra });
+    const c1 = lt('LT 500kV Medeiros Neto II - João Neiva 2 C1');
+    const c2 = lt('LT 500kV Medeiros Neto II - João Neiva 2 C2');
+    const epeC2 = registro({ nome: 'LT 500 kV Medeiros Neto II - João Neiva 2, C2', tensoesKv: [500], ufs: ['ES'] });
+    const d = decidirCorrespondencia(epeC2, [c1, c2], orgs);
+    expect(d).toMatchObject({ acao: 'vincular', empreendimentoId: c2.id });
+    expect(pontuarCorrespondencia(epeC2, c1, orgs).pontuacao).toBeLessThan(0.55);
+    const seccIco = lt('Reforço - Seccionamento da LT Banabuiú-Milagres C2 na SE Icó.', { localizacao: { ufs: ['CE'], municipios: [] } });
+    expect(decidirCorrespondencia(registro({ nome: 'SECC LT 230 kV Banabuiú - Milagres, C2 na SE Gameleira', ufs: ['CE'] }), [seccIco], orgs).acao).not.toBe('vincular');
+    expect(decidirCorrespondencia(registro({ nome: 'SECC LT 230 kV Milagres - Banabuiú, C2, na SE Icó', ufs: ['CE'] }), [seccIco], orgs).acao).toBe('vincular');
   });
 
   it('nome + UF + tensão + empreendedor vinculam automaticamente', () => {

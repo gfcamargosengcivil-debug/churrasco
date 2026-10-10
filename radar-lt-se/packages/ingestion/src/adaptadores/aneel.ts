@@ -159,7 +159,8 @@ export function registroSiget(
     if (construcao && km) extensaoNova += km;
     for (const uf of [texto(lt?.SigUFSubestacaoOrigem), texto(lt?.SigUFSubestacaoDestino)]) if (ehUf(uf)) ufs.add(uf);
     trechos.push({
-      nome: texto(lt?.NomLinTms) || texto(linha.NomMdl),
+      // Nome do módulo traz o circuito ("C-1"): distingue circuitos da mesma LT.
+      nome: texto(linha.NomMdl) || texto(lt?.NomLinTms),
       tensaoKv: kv,
       corrente: 'CA',
       // Recapacitação/adequação de linha existente: a extensão é da linha, não de obra nova.

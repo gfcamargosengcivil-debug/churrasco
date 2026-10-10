@@ -15,6 +15,7 @@ export * from './comercial/mercado.js';
 export * from './comercial/score.js';
 export * from './qualidade/registro.js';
 export * from './qualidade/dedup.js';
+export * from './qualidade/identidadeLT.js';
 export * from './qualidade/mescla.js';
 export * from './qualidade/indicadores.js';
 export * from './alertas/index.js';
