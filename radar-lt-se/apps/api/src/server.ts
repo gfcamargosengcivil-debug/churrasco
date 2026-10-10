@@ -1,3 +1,4 @@
+import './env.js';
 import { construirApp } from './app.js';
 import { carregarConfig } from './config.js';
 import { criarManipuladores, iniciarAgendador, iniciarProcessamento } from './jobs/processador.js';

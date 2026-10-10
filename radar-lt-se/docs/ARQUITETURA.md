@@ -26,7 +26,7 @@ reais (ver `FONTES.md`).
             │ apps/api (Fastify)                                                            │
             │  rotas · auth/RBAC · auditoria · logs (pino) · validação (zod) · exportações   │
             │  Repositório ──► MemoryRepository (JSON local)  |  PgRepository (PostGIS)      │
-            │  Fila de jobs ──► MemoryJobQueue                |  PgJobQueue (SKIP LOCKED)    │
+            │  Fila de jobs ──► FilaMemoria                   |  FilaPostgres (SKIP LOCKED)  │
             │  Scheduler (frequência por fonte) · Worker (processo separado)                │
             └───────▲──────────────────────▲────────────────────────▲──────────────────────┘
                     │                      │                        │
@@ -102,9 +102,11 @@ principais: `organizacao`, `empreendimento`, `participacao`, `lote`,
 `trecho_lt` (geometria `LineString` + natureza do traçado), `subestacao`
 (geometria `Point` + precisão), `contrato`, `pacote_servico`, `etapa_status`,
 `marco`, `evidencia`, `documento`, `fonte`, `coleta`, `proveniencia_campo`,
-`conflito`, `historico_alteracao`, `match_candidato`, `oportunidade_comercial`,
-`interacao_comercial`, `alerta_regra`, `alerta_evento`, `configuracao`,
-`job`, `audit_log`.
+`conflito`, `historico_alteracao` (somente inserção), `evento_mudanca`,
+`match_candidato`, `oportunidade_comercial` (contatos, interações e próximos
+passos em JSONB), `alerta_regra`, `alerta_notificacao`, `snapshot_pipeline`,
+`configuracao`, `job`, `audit_log`. Políticas RLS para Supabase:
+`db/migrations/supabase/0002_rls.sql`.
 
 ## 5. Decisões técnicas
 

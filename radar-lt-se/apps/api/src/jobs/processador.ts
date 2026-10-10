@@ -6,12 +6,19 @@ import type { FilaJobs, Job, TipoJob } from './fila.js';
 
 export type Manipulador = (job: Job) => Promise<unknown>;
 
+/** Erro que não melhora com nova tentativa (ex.: adaptador sem configuração/credencial). */
+export class ErroPermanente extends Error {}
+
 export function criarManipuladores(s: Servicos, ing: ServicoIngestao): Record<TipoJob, Manipulador> {
   return {
     coletar_fonte: async (job) => {
       const { fonteId, usuario, disparo } = job.payload as { fonteId: string; usuario?: string; disparo?: 'agendado' | 'manual' };
       const c = await ing.executarFonte(fonteId, disparo ?? 'agendado', usuario);
-      if (c.status === 'erro') throw new Error(c.erros.join(' | ').slice(0, 1000));
+      if (c.status === 'erro') {
+        const msg = c.erros.join(' | ').slice(0, 1000);
+        // Falta de configuração não se resolve com retentativa; falha de rede/fonte sim.
+        throw c.erros.every((x) => x.startsWith('Adaptador não configurado')) ? new ErroPermanente(msg) : new Error(msg);
+      }
       return { coleta: c.id, status: c.status, criados: c.criados, atualizados: c.atualizados };
     },
     analisar_documento: async (job) => {
@@ -33,7 +40,7 @@ export async function processarProximo(fila: FilaJobs, manip: Record<TipoJob, Ma
     await fila.concluir(job.id, resultado);
     log.info({ job: job.id, tipo: job.tipo, ms: Date.now() - inicio }, 'job concluído');
   } catch (e) {
-    await fila.falhar(job.id, (e as Error).message);
+    await fila.falhar(job.id, (e as Error).message, e instanceof ErroPermanente);
     log.error({ job: job.id, tipo: job.tipo, tentativa: job.tentativas, err: (e as Error).message }, 'job falhou');
   }
   return true;

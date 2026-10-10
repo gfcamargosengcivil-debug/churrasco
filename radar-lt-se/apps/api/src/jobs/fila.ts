@@ -29,7 +29,8 @@ export interface FilaJobs {
   enfileirar(tipo: TipoJob, payload: Record<string, unknown>, opcoes?: OpcoesEnfileirar): Promise<Job | undefined>;
   reservar(): Promise<Job | undefined>;
   concluir(id: string, resultado?: unknown): Promise<void>;
-  falhar(id: string, erro: string): Promise<void>;
+  /** Registra a falha; reagenda com atraso exponencial salvo se `definitivo` ou tentativas esgotadas. */
+  falhar(id: string, erro: string, definitivo?: boolean): Promise<void>;
   listar(limite?: number): Promise<Job[]>;
 }
 
@@ -66,11 +67,11 @@ export class FilaMemoria implements FilaJobs {
     if (j) Object.assign(j, { status: 'concluido', resultado, finalizadoEm: new Date().toISOString(), erro: undefined });
   }
 
-  async falhar(id: string, erro: string) {
+  async falhar(id: string, erro: string, definitivo = false) {
     const j = this.jobs.find((x) => x.id === id);
     if (!j) return;
     j.erro = erro;
-    if (j.tentativas < j.maxTentativas) {
+    if (!definitivo && j.tentativas < j.maxTentativas) {
       j.status = 'pendente';
       j.executarEm = new Date(Date.now() + atrasoMs(j.tentativas)).toISOString();
     } else {
@@ -121,14 +122,14 @@ export class FilaPostgres implements FilaJobs {
     await this.pool.query(`update job set status = 'concluido', resultado = $2, erro = null, finalizado_em = now() where id = $1`, [id, resultado === undefined ? null : JSON.stringify(resultado)]);
   }
 
-  async falhar(id: string, erro: string) {
+  async falhar(id: string, erro: string, definitivo = false) {
     await this.pool.query(
       `update job set erro = $2,
-         status = case when tentativas < max_tentativas then 'pendente' else 'erro' end,
-         executar_em = case when tentativas < max_tentativas then now() + (tentativas * tentativas) * interval '1 minute' else executar_em end,
-         finalizado_em = case when tentativas < max_tentativas then null else now() end
+         status = case when not $3 and tentativas < max_tentativas then 'pendente' else 'erro' end,
+         executar_em = case when not $3 and tentativas < max_tentativas then now() + (tentativas * tentativas) * interval '1 minute' else executar_em end,
+         finalizado_em = case when not $3 and tentativas < max_tentativas then null else now() end
        where id = $1`,
-      [id, erro.slice(0, 4000)],
+      [id, erro.slice(0, 4000), definitivo],
     );
   }
 

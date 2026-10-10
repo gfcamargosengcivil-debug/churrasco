@@ -3,6 +3,7 @@
  * rotina diária de janelas/alertas e retrato mensal do pipeline. Pode haver várias réplicas:
  * a reserva de jobs usa FOR UPDATE SKIP LOCKED e o agendamento usa chaves únicas.
  */
+import './env.js';
 import pino from 'pino';
 import { carregarConfig } from './config.js';
 import { criarRepositorio } from './app.js';

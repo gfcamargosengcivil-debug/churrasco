@@ -2,6 +2,7 @@
  * Aplica as migrações SQL pendentes (db/migrations/*.sql) em ordem.
  * Com MIGRAR_SUPABASE=true também aplica db/migrations/supabase/*.sql (políticas RLS).
  */
+import '../env.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import pg from 'pg';

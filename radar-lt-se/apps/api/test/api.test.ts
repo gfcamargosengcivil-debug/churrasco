@@ -1,9 +1,31 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it as itBase } from 'vitest';
 import { SignJWT } from 'jose';
 import type { FastifyInstance } from 'fastify';
 import { construirApp } from '../src/app.js';
 import { carregarConfig } from '../src/config.js';
 import { MemoryRepository } from '../src/repositorio/memoria.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import pg from 'pg';
+import { PgRepository, criarPool } from '../src/repositorio/postgres.js';
+import { FilaPostgres } from '../src/jobs/fila.js';
+import type { Repositorio } from '../src/repositorio/tipos.js';
+import type { FilaJobs } from '../src/jobs/fila.js';
+import { criarManipuladores, processarProximo } from '../src/jobs/processador.js';
+import type { AppMontado } from '../src/app.js';
+
+/** PostgreSQL de teste (opcional): DATABASE_URL_TESTE=postgres://… — o esquema public é recriado. */
+const URL_PG = process.env.DATABASE_URL_TESTE;
+
+async function prepararPostgres(): Promise<{ repo: Repositorio; fila: FilaJobs }> {
+  const c = new pg.Client({ connectionString: URL_PG });
+  await c.connect();
+  await c.query('drop schema if exists public cascade; create schema public;');
+  await c.query(readFileSync(fileURLToPath(new URL('../../../db/migrations/0001_init.sql', import.meta.url)), 'utf8'));
+  await c.end();
+  const pool = criarPool({ DATABASE_URL: URL_PG, DATABASE_SSL: false });
+  return { repo: new PgRepository(pool), fila: new FilaPostgres(pool) };
+}
 
 function multipart(campos: Record<string, string>, arquivo: { nome: string; conteudo: Buffer | string; tipo?: string }) {
   const limite = '----radarlimite' + Math.random().toString(16).slice(2);
@@ -17,17 +39,26 @@ function multipart(campos: Record<string, string>, arquivo: { nome: string; cont
   return { payload: Buffer.concat(partes), headers: { 'content-type': `multipart/form-data; boundary=${limite}` } };
 }
 
-describe('API (modo dev, memória, dados demo)', () => {
+const PERSISTENCIAS: { nome: 'memoria' | 'postgres'; ativo: boolean; montar: () => Promise<{ repo: Repositorio; fila?: FilaJobs }> }[] = [
+  { nome: 'memoria', ativo: true, montar: async () => ({ repo: new MemoryRepository() }) },
+  { nome: 'postgres', ativo: !!URL_PG, montar: prepararPostgres },
+];
+
+describe.each(PERSISTENCIAS)('API (modo dev, $nome, dados demo)', ({ nome, ativo, montar }) => {
   let app: FastifyInstance;
+  let montado: AppMontado;
   beforeAll(async () => {
+    if (!ativo) return;
     const amb = carregarConfig({ NODE_ENV: 'test', DEMO_AUTOCARGA: 'true', AGENDADOR: 'false' });
-    ({ app } = await construirApp({ amb, repo: new MemoryRepository(), logger: false }));
+    montado = await construirApp({ amb, ...(await montar()), logger: false });
+    ({ app } = montado);
   });
-  afterAll(async () => app.close());
+  afterAll(async () => app?.close());
+  const it = ativo ? itBase : itBase.skip;
 
   it('saúde e lista com dados fictícios marcados', async () => {
     const s = await app.inject('/api/saude');
-    expect(s.json()).toMatchObject({ ok: true, persistencia: 'memoria', autenticacao: 'dev' });
+    expect(s.json()).toMatchObject({ ok: true, persistencia: nome, autenticacao: 'dev' });
     const r = await app.inject('/api/empreendimentos');
     const lista = r.json();
     expect(lista.length).toBe(31);
@@ -140,6 +171,20 @@ describe('API (modo dev, memória, dados demo)', () => {
     expect(emp.marcos[0]).toMatchObject({ tipo: 'rfq_publicada', data: '2027-03-01', natureza: 'previsto_oficial' });
   });
 
+  it('coleta via fila: adaptador sem configuração registra erro sem retentativa', async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/fontes/aneel-dados-abertos/executar' });
+    expect(r.json().enfileirado).toBe(true);
+    const dup = await app.inject({ method: 'POST', url: '/api/fontes/aneel-dados-abertos/executar' });
+    expect(dup.json().enfileirado).toBe(false);
+    const manip = criarManipuladores(montado.servicos, montado.ingestao);
+    expect(await processarProximo(montado.fila, manip, app.log)).toBe(true);
+    const job = (await montado.fila.listar(10)).find((j) => j.id === r.json().job.id);
+    expect(job).toMatchObject({ status: 'erro', tentativas: 1 });
+    const coletas = (await app.inject('/api/coletas?fonteId=aneel-dados-abertos')).json();
+    expect(coletas[0]).toMatchObject({ status: 'erro' });
+    expect(coletas[0].erros[0]).toContain('Adaptador não configurado');
+  });
+
   it('exportações para Excel/Power BI', async () => {
     const x = await app.inject('/api/export/radar.xlsx');
     expect(x.headers['content-type']).toContain('spreadsheetml');
@@ -158,6 +203,7 @@ describe('API (modo dev, memória, dados demo)', () => {
 });
 
 describe('API — autenticação Supabase (JWT) e papéis', () => {
+  const it = itBase;
   const SEGREDO = 'segredo-de-teste-com-tamanho-suficiente-123';
   let app: FastifyInstance;
   const token = (role: string | undefined, segredo = SEGREDO) =>

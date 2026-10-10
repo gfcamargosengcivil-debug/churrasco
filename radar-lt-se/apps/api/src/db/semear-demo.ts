@@ -1,4 +1,5 @@
 /** Carrega os dados DEMONSTRATIVOS FICTÍCIOS na base configurada (memória ou PostgreSQL). */
+import '../env.js';
 import pino from 'pino';
 import { criarRepositorio } from '../app.js';
 import { carregarConfig } from '../config.js';

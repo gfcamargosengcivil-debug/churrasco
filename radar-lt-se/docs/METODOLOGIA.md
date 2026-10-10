@@ -38,14 +38,24 @@ mobilização, início das obras, energização e próximo marco.
 4. **Sinal fraco** (anúncio, inclusão em plano) + premissas — natureza `heuristico`.
 
 A âncora é o marco mais avançado disponível, nesta ordem: outorga realizada (contrato de
-concessão/REA) → decisão final de investimento (privados) → parecer de acesso (geração) →
-outorga prevista divulgada → leilão realizado (+ prazo até assinatura) → leilão previsto →
-edital → inclusão em plano/consulta pública (heurístico) → anúncio (heurístico).
+concessão/REA) → contratação principal/vencedor definido (privados) → decisão final de
+investimento (privados) → parecer de acesso (geração) → outorga prevista divulgada →
+leilão realizado (+ prazo até assinatura) → leilão previsto → edital → inclusão em
+plano/consulta pública (heurístico) → anúncio (heurístico).
+
+### 2.1.1 Escopos LT e SE separados
+
+A previsão é feita por escopo (LT e SE) e por pacote. Um escopo com pacote já contratado
+não gera nova janela; o início de obra só é usado para inferir contratação de um escopo
+quando não há pacote pendente daquele escopo. A RFQ "geral" é a mais cedo entre os escopos
+pendentes. Se qualquer escopo pendente estiver em cotação, a necessidade é **imediata**.
 
 ### 2.2 Cálculo progressivo e regressivo
 
 - **Progressivo:** âncora + prazo (outorga → RFQ de LT/SE; FID → RFQ; RFQ → contrato; contrato → mobilização; mobilização → obras).
 - **Licença de Instalação:** a mobilização é a mais tardia entre "contrato + prazo" e "LI (real, divulgada ou estimada) + prazo".
+  LI já emitida (ou divulgada) sem RFQ identificada impõe um **teto** à RFQ: LI + prazo "LI → RFQ" (0 / 2 / 4 meses),
+  pois o empreendedor tende a contratar logo após a licença.
 - **Regressivo:** quando há prazo de energização (contratual ou divulgado), calcula-se a data-limite de RFQ =
   energização − comissionamento − duração da obra − mobilização→obras − contrato→mobilização − RFQ→contrato.
   Nos cenários otimista e base a RFQ não é prevista depois dessa data-limite (aviso "cronograma apertado").
@@ -67,6 +77,7 @@ edital → inclusão em plano/consulta pública (heurístico) → anúncio (heur
 | FID / contratação principal → RFQ | 2 / 4 / 8 |
 | Parecer de acesso → RFQ | 4 / 8 / 14 |
 | Pré-qualificação/RFI → RFQ | 1 / 2 / 3 |
+| LI emitida → RFQ (teto) | 0 / 2 / 4 |
 | RFQ → contrato | 2 / 3 / 5 |
 | Contrato → mobilização | 1 / 2 / 3 |
 | LI → mobilização | 0 / 1 / 3 |
@@ -123,7 +134,9 @@ premissa na interface até serem substituídos pela base de custos da empresa.
 ## 5. Índice de priorização
 
 Dez critérios com nota 0–5 por regra explícita e justificativa, ponderados por pesos
-configuráveis; índice = média ponderada × 100. Faixas padrão: alta ≥ 65; média ≥ 45.
+configuráveis; índice = média ponderada × 100. Faixas padrão: alta ≥ 75; média ≥ 55.
+Fora do escopo (< 138 kV) e empreendimentos cancelados, concluídos, suspensos ou adiados
+ficam limitados abaixo da faixa média.
 
 | Critério | Peso padrão | Regra resumida |
 |---|---|---|
