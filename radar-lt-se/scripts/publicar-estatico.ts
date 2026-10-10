@@ -10,9 +10,10 @@
  * A coleta só roda onde há acesso às fontes (ex.: GitHub Actions). Falha de uma fonte não derruba
  * a publicação: fica registrada na coleta e os dados anteriores da base são mantidos.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { arquivoEstatico, hojeISO } from '@radar/core';
+import { arquivoEstatico, hojeISO, mesclarConfiguracao, type ConfiguracaoPlataforma } from '@radar/core';
+import { CATALOGO_FONTES } from '@radar/ingestion';
 import { construirApp } from '../apps/api/src/app.js';
 import { carregarConfig } from '../apps/api/src/config.js';
 import { MemoryRepository } from '../apps/api/src/repositorio/memoria.js';
@@ -38,6 +39,17 @@ const amb = carregarConfig({
 const repo = new MemoryRepository(estado);
 const { app, servicos, ingestao } = await construirApp({ amb, repo, logger: false });
 await app.ready();
+
+// Configuração da publicação versionada no repositório (a versão publicada não tem administrador).
+const arqConfig = resolve(argumento('config') ?? 'config/publicacao.json');
+const configPublicacao = existsSync(arqConfig) ? (JSON.parse(readFileSync(arqConfig, 'utf8')) as Partial<ConfiguracaoPlataforma> & { configurado?: boolean }) : {};
+const atual = await servicos.configuracao();
+await servicos.salvarConfiguracao(mesclarConfiguracao({ ...atual, portfolio: { ...atual.portfolio, ...configPublicacao.portfolio } }), { id: 'publicacao', papel: 'admin' } as never);
+// A configuração das fontes vem sempre do catálogo versionado (correções de código chegam à coleta).
+for (const f of CATALOGO_FONTES) {
+  const persistida = (await repo.listarFontes()).find((x) => x.id === f.id);
+  if (persistida) await repo.salvarFonte({ ...persistida, config: f.config, statusIntegracao: f.statusIntegracao, limitacoes: f.limitacoes, nome: f.nome, url: f.url, frequencia: f.frequencia });
+}
 
 // 1) Coleta das fontes automáticas (sequencial: a deduplicação de uma fonte vê o que a anterior gravou).
 const coletas: { fonteId: string; fonte: string; status: string; registrosLidos: number; criados: number; atualizados: number; erros: string[]; avisos: string[] }[] = [];
@@ -115,6 +127,8 @@ await exportar('/publicacao', {
   incertos,
   /** Pares de empreendimentos com alta similaridade (podem ser o mesmo empreendimento). */
   possiveisDuplicidades: qualidade?.duplicidades?.length ?? 0,
+  /** Prioridade calculada sem o portfólio da empresa (critério geográfico neutro). */
+  portfolioConfigurado: !!configPublicacao.configurado,
   demo,
 });
 await app.close();

@@ -32,6 +32,7 @@ interface Publicacao {
   empreendimentos: number;
   incertos?: number;
   possiveisDuplicidades?: number;
+  portfolioConfigurado?: boolean;
   demo?: boolean;
 }
 
@@ -47,6 +48,7 @@ function AvisoPublicacao({ p }: { p: Publicacao }) {
         </>
       )}
       {falhas.length > 0 && <> Sem resposta nesta coleta: {falhas.map((c) => c.fonte).join('; ')} — dados anteriores mantidos.</>}
+      {p.portfolioConfigurado === false && <> A prioridade usa um perfil genérico (portfólio da empresa não configurado; critério geográfico neutro).</>}
       {!!p.possiveisDuplicidades && <> {p.possiveisDuplicidades} par(es) de registros semelhantes podem ser o mesmo empreendimento (<a href="#/qualidade">Qualidade → Possíveis duplicidades</a>); totais podem estar superestimados.</>}
       {' '}Datas calculadas são estimativas da plataforma, não compromissos dos empreendedores.
     </div>

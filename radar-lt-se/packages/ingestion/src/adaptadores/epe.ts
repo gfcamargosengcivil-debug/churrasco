@@ -80,8 +80,19 @@ export function ufDoPonto(p: Coord, ufs: PoligonoUf[]): UF | undefined {
 }
 
 /** Converte a camada de UFs da EPE em polígonos; identifica a sigla em qualquer atributo com 2 letras válidas. */
+/** Códigos IBGE das UFs (referência oficial; mais confiável que a sigla digitada na camada). */
+const UF_POR_CODIGO_IBGE: Record<number, UF> = {
+  11: 'RO', 12: 'AC', 13: 'AM', 14: 'RR', 15: 'PA', 16: 'AP', 17: 'TO', 21: 'MA', 22: 'PI', 23: 'CE', 24: 'RN', 25: 'PB',
+  26: 'PE', 27: 'AL', 28: 'SE', 29: 'BA', 31: 'MG', 32: 'ES', 33: 'RJ', 35: 'SP', 41: 'PR', 42: 'SC', 43: 'RS', 50: 'MS',
+  51: 'MT', 52: 'GO', 53: 'DF',
+};
+
+/** Divergências encontradas entre sigla e código IBGE na camada (ex.: "BH" para a Bahia). */
+export const divergenciasUf: string[] = [];
+
 export function poligonosUf(feicoes: FeicaoEpe[]): PoligonoUf[] {
   const out: PoligonoUf[] = [];
+  divergenciasUf.length = 0;
   for (const f of feicoes) {
     const g = f.geometry;
     if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
@@ -89,8 +100,12 @@ export function poligonosUf(feicoes: FeicaoEpe[]): PoligonoUf[] {
     const entradas = Object.entries(f.properties);
     const nomeado = entradas.find(([k, v]) => /^(sigla|sg_?uf|uf|sigla_?uf|estado_?sigla)$/i.test(k) && (UFS as readonly string[]).includes(String(v ?? '').trim().toUpperCase()));
     const valor = nomeado?.[1] ?? entradas.map(([, v]) => v).find((v) => (UFS as readonly string[]).includes(String(v ?? '').trim().toUpperCase()));
-    if (!valor) continue;
-    const sigla = String(valor).trim().toUpperCase() as UF;
+    const codigo = Number(f.properties.COD_UF ?? f.properties.cod_uf ?? f.properties.CD_UF ?? NaN);
+    const porCodigo = UF_POR_CODIGO_IBGE[codigo];
+    const siglaCampo = String(f.properties.UF ?? f.properties.uf ?? f.properties.SIGLA ?? '').trim().toUpperCase();
+    if (porCodigo && siglaCampo && siglaCampo !== porCodigo) divergenciasUf.push(`sigla "${siglaCampo}" com código IBGE ${codigo} (${porCodigo})`);
+    if (!valor && !porCodigo) continue;
+    const sigla = (porCodigo ?? String(valor).trim().toUpperCase()) as UF;
     // MultiPolygon: cada polígono avaliado à parte; Polygon: todos os anéis juntos (par-ímpar).
     out.push({ uf: sigla, poligonos: g.type === 'Polygon' ? [g.coordinates] : g.coordinates });
   }
@@ -292,6 +307,7 @@ export const adaptadorEpeWebmap: Adaptador = {
     const [lts, ses, ufsF] = await Promise.all([consultar(ctx.fetch, `${base}/${cLT}`), consultar(ctx.fetch, `${base}/${cSE}`), consultar(ctx.fetch, `${base}/${cUF}`, '*', 0.01)]);
     const ufs = poligonosUf(ufsF);
     const avisos: string[] = [];
+    if (divergenciasUf.length) avisos.push(`Camada de UFs da EPE com sigla divergente do código IBGE: ${divergenciasUf.join('; ')} — usado o código IBGE.`);
     const faltantes = UFS.filter((u) => !ufs.some((x) => x.uf === u));
     if (faltantes.length) avisos.push(`Camada de UFs sem polígono reconhecido para: ${faltantes.join(', ')} — a UF dessas regiões não é atribuída pela geometria.`);
     const rl = registrosLT(lts, { fonte, hoje: ctx.hoje, url: `${base}/${cLT}`, rotuloCamada: 'Linhas de Transmissão - Expansão Planejada', ufs });

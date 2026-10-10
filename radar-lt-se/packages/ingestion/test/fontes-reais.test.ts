@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { Fonte, RegistroNormalizado } from '@radar/core';
 import {
   adaptadorEpeWebmap, adaptadorLeiloesTransmissao, adaptadorSiget, CATALOGO_FONTES, registroLeilao, registroSE, registrosLT,
-  localizarPorSubestacao, subestacoesCitadas, ufDoPonto, ufsDoModulo, type FeicaoEpe, type PoligonoUf,
+  localizarPorSubestacao, poligonosUf, subestacoesCitadas, ufDoPonto, ufsDoModulo, type FeicaoEpe, type PoligonoUf,
 } from '../src/index.js';
 
 const HOJE = '2026-10-10';
@@ -175,6 +175,12 @@ describe('EPE WebMap', () => {
     expect(registros[0].trechosLT).toHaveLength(2);
     expect(new Set(registros[0].trechosLT!.map((t) => t.nome)).size).toBe(2);
     expect(registros[0].extensaoKm).toBeCloseTo(30.4, 1);
+  });
+
+  it('UF pelo código IBGE quando a sigla da camada diverge (caso real: Bahia gravada como "BH")', () => {
+    const ufs = poligonosUf([{ geometry: { type: 'Polygon', coordinates: [[[-42, -15], [-39, -15], [-39, -11], [-42, -11], [-42, -15]]] }, properties: { Nome: 'BAHIA', COD_UF: 29, UF: 'BH' } }]);
+    expect(ufs.map((u) => u.uf)).toEqual(['BA']);
+    expect(ufDoPonto([-40, -13], ufs)).toBe('BA');
   });
 
   it('SE planejada: localização aproximada, tensões e UF', () => {
