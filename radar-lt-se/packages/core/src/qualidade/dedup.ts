@@ -76,7 +76,7 @@ export function identidadesDoRegistro(r: RegistroNormalizado): IdentidadeLT[] {
 const cacheSesProj = new WeakMap<Empreendimento, { assinatura: string; ses: string[] }>();
 const cacheSesReg = new WeakMap<RegistroNormalizado, string[]>();
 /** Subestações objeto do empreendimento (pelo nome oficial e apelidos). */
-function sesDoEmpreendimento(p: Empreendimento): string[] {
+export function sesDoEmpreendimento(p: Empreendimento): string[] {
   const assinatura = `${p.nomeOficial}|${p.nomesAlternativos.length}`;
   const c = cacheSesProj.get(p);
   if (c?.assinatura === assinatura) return c.ses;
@@ -84,7 +84,7 @@ function sesDoEmpreendimento(p: Empreendimento): string[] {
   cacheSesProj.set(p, { assinatura, ses });
   return ses;
 }
-function sesDoRegistro(r: RegistroNormalizado): string[] {
+export function sesDoRegistro(r: RegistroNormalizado): string[] {
   let ses = cacheSesReg.get(r);
   if (!ses) {
     ses = [...new Set([r.nome, ...(r.nomesAlternativos ?? [])].flatMap(subestacoesDoNome))];
@@ -92,7 +92,7 @@ function sesDoRegistro(r: RegistroNormalizado): string[] {
   }
   return ses;
 }
-const sesContidas = (xs: string[], ys: string[]) => xs.length > 0 && xs.every((x) => ys.some((y) => mesmaExtremidade(x, y)));
+export const sesContidas = (xs: string[], ys: string[]) => xs.length > 0 && xs.every((x) => ys.some((y) => mesmaExtremidade(x, y)));
 
 /** Todas as identidades de xs têm correspondente idêntico (extremidades, tensão e circuito) em ys. */
 export const identidadesContidas = (xs: IdentidadeLT[], ys: IdentidadeLT[]) =>

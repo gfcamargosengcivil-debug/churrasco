@@ -143,6 +143,17 @@ A versão publicada não tem login nem edição (gestão comercial, importaçõe
 correspondências e configurações exigem a instalação com servidor). Falha de uma fonte não derruba a
 publicação: o aviso no topo do site informa as fontes sem resposta e os dados anteriores são mantidos.
 
+Limites conhecidos da versão publicada (também indicados no próprio site):
+
+- **Potencial de mercado** usa parâmetros ilustrativos (R$/km, R$/SE) até a empresa cadastrar a sua
+  base de custos; investimento de leilão é a referência do edital (estimativa).
+- **Prioridade** usa perfil genérico (portfólio da empresa não configurado em `config/publicacao.json`).
+- **Datas** calculadas (RFQ, energização a partir do ano da EPE ou do prazo do leilão) são estimativas
+  rotuladas; só são "divulgadas" as datas informadas pelas fontes oficiais.
+- **Sem revisor humano**: correspondências incertas viram cadastros novos e os pares semelhantes ficam em
+  Qualidade → Possíveis duplicidades; empreendimentos conhecidos só pela EPE ou por lote de leilão não
+  são encerrados automaticamente.
+
 Execução local equivalente (com acesso às fontes):
 
 ```bash

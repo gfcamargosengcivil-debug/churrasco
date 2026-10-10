@@ -5,7 +5,7 @@
  */
 import {
   compararIdentidades, identidadeDoTrecho, identidadesCompativeis, identidadesContidas, identidadesDoEmpreendimento, identidadesDoNome, identidadesDoRegistro, identidadesIguais,
-  pontuarCorrespondencia,
+  pontuarCorrespondencia, sesContidas, sesDoEmpreendimento, sesDoRegistro,
   CONFIGURACAO_PADRAO, RegistroNormalizadoSchema, criarEmpreendimentoDeRegistro, decidirCorrespondencia, detectarMudancas,
   mesclarRegistro, novoId, resumoRegistro, type Coleta, type ConfiguracaoPlataforma, type ContextoMescla, type Empreendimento, type EventoMudanca,
   type Fonte, type IdentidadeLT, type MatchCandidato, type Organizacao, type RegistroNormalizado,
@@ -64,7 +64,8 @@ export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento
   const [cR, cP] = [porCircuito(idsR), porCircuito(idsP)];
   const exato = !opcoes.parcial && cR.length > 0 && cP.length > 0 && cR.every((a) => cP.some((b) => igual(a, b))) && cP.every((b) => cR.some((a) => igual(a, b)));
   // Registro sem LT identificada (ex.: subestação) ou com todas as LTs dentro do empreendimento.
-  const parte = !opcoes.parcial && (idsR.length === 0 || identidadesContidas(idsR, idsP));
+  // Registro sem LT identificada (ex.: a SE) ou com todas as LTs dentro do empreendimento.
+  const parte = idsR.length === 0 || (!opcoes.parcial && identidadesContidas(idsR, idsP));
   const trechos: NonNullable<RegistroNormalizado['trechosLT']> = [];
   for (const t of r.trechosLT ?? []) {
     if (!t.tracado) continue;
@@ -80,9 +81,10 @@ export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento
     nome: exato ? r.nome : p.nomeOficial,
     nomesAlternativos: exato ? r.nomesAlternativos : undefined,
     identificadores: opcoes.parcial ? undefined : r.identificadores,
-    organizacoes: r.organizacoes,
+    // Participantes do registro só quando ele é a mesma instalação ou parte dela.
+    organizacoes: exato || parte ? r.organizacoes : undefined,
     // UFs do registro só quando é a mesma instalação (a descrição de um lote pode não listar todos os itens).
-    ufs: exato || !p.localizacao.ufs.length ? r.ufs : undefined,
+    ufs: exato || (parte && idsR.length === 0) || !p.localizacao.ufs.length ? r.ufs : undefined,
     ponto: parte && !p.localizacao.ponto ? r.ponto : undefined,
     trechosLT: trechos.length ? trechos : undefined,
     marcos: (r.marcos ?? []).filter((m) => !tiposComMarco.has(m.tipo) && !(temEnergizacao && ['energizacao', 'operacao_comercial', 'prazo_contratual_energizacao'].includes(m.tipo))),
@@ -96,19 +98,29 @@ export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento
 
 /**
  * Empreendimentos que são partes de um registro que abrange várias instalações (ex.: lote com várias
- * LTs): compartilham ao menos uma LT com o registro (uma LT pertence a um só empreendimento) e têm
- * correspondência plausível. Vazio quando algum empreendimento contém o registro inteiro (caso comum
- * de correspondência, decidido pela pontuação).
+ * LTs): compartilham ao menos uma LT com o registro (uma LT pertence a um só empreendimento) ou, para
+ * registro só de SE, a SE objeto. LT idêntica (com circuito) basta, salvo UF incompatível; nos demais
+ * casos exige correspondência plausível. Vazio quando algum empreendimento contém o registro inteiro
+ * (caso comum de correspondência, decidido pela pontuação).
  */
 export function partesDoRegistro(r: RegistroNormalizado, projetos: Empreendimento[], organizacoes: Map<string, Organizacao>, cfg: ConfiguracaoPlataforma['dedup']): Empreendimento[] {
   const idsR = identidadesDoRegistro(r);
-  if (!idsR.length) return [];
+  const sesR = sesDoRegistro(r);
+  if (!idsR.length && !sesR.length) return [];
   const partes = projetos.filter((p) => {
     if (p.statusGeral === 'cancelado') return false;
+    if (!idsR.length) {
+      // Registro só de SE (ex.: SE planejada da EPE): empreendimentos cuja SE objeto é a mesma.
+      return sesContidas(sesR, sesDoEmpreendimento(p)) && pontuarCorrespondencia(r, p, organizacoes, cfg).pontuacao >= cfg.limiarAutomatico;
+    }
     const idsP = identidadesDoEmpreendimento(p);
-    if (!idsP.some((b) => idsR.some((a) => identidadesCompativeis(a, b)))) return false;
-    return pontuarCorrespondencia(r, p, organizacoes, cfg).pontuacao >= cfg.limiarRevisao;
+    const identica = idsP.some((b) => idsR.some((a) => compararIdentidades(a, b) === 'mesma'));
+    if (!identica && !idsP.some((b) => idsR.some((a) => identidadesCompativeis(a, b)))) return false;
+    const c = pontuarCorrespondencia(r, p, organizacoes, cfg);
+    if (c.motivos.includes('Nenhuma UF em comum.')) return false;
+    return c.pontuacao >= (identica ? 0.3 : cfg.limiarRevisao);
   });
+  if (!idsR.length) return partes.length >= 2 ? partes : [];
   const contemTudo = partes.some((p) => {
     const idsP = identidadesDoEmpreendimento(p);
     return idsR.every((a) => idsP.some((b) => identidadesCompativeis(a, b)));

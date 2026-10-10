@@ -54,11 +54,15 @@ export function identidadesDoNome(nome: string): IdentidadeLT[] {
     .replace(/\([^)]*\)/g, ' ')
     // Separador de itens em listas oficiais: hífen colado ao texto anterior ("..., CS- LT 500 kV ...").
     .replace(/(\S)-\s+(?=(?:lt|se|secc|seccionamento|trechos?)\b)/g, '$1; ')
-    // "Trechos de LT 500 kV entre a SE A e o seccionamento da LT B - C" = seccionamento da LT B - C na SE A.
+    // "Trechos de LT 500 kV entre a SE A e o(s) seccionamento(s) da LT B - C" (ou "e a LT B - C") =
+    // seccionamento da LT B - C na SE A.
     .replace(
-      /\btrechos?\s+d[ae]\s+lts?\s+((?:\d+(?:[.,]\d+)?\s*kv\s+)?)entre\s+(?:a\s+|o\s+)?(?:se\s+)?([a-z0-9 ]+?)\s+e\s+o\s+seccionamento\s+da\s+lt\s+(?:\d+(?:[.,]\d+)?\s*kv\s+)?([^;|]+?)(?=[;|]|$)/g,
+      /\btrechos?\s+d[ae]\s+lts?\s+((?:\d+(?:[.,]\d+)?\s*kv\s+)?)entre\s+(?:a\s+|o\s+)?(?:se\s+)?([a-z0-9 ]+?)\s+e\s+(?:(?:o|os)\s+seccionamentos?\s+da\s+|a\s+)lts?\s+(?:\d+(?:[.,]\d+)?\s*kv\s+)?([^;|]+?)(?=[;|]|$)/g,
       (_m, kv: string, se: string, lt: string) => `secc lt ${kv}${lt} na se ${se}`,
-    );
+    )
+    // "Seccionamento da LT A - B / SE C" = "... na SE C"; "lançamento do C2 da LT A - B" = "LT A - B, C2".
+    .replace(/(secc\w*[^;|]*?)\s*\/\s*se\s+/g, '$1 na se ')
+    .replace(/\bc\s*-?\s*(\d{1,2})\s+da\s+lt\s+([^;|.]+)/g, 'lt $2, c$1');
   // "SE X e seccionamento(s) da(s) LT(s) A - B": a SE do seccionamento vem antes.
   const seAntes = /\bse\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+)*\s*kv\s+)?([a-z0-9 ]+?)\s+e\s+(?:o\s+)?secc/.exec(bruto)?.[1];
   const out: IdentidadeLT[] = [];
@@ -142,10 +146,14 @@ export function identidadesCompativeis(r: IdentidadeLT, p: IdentidadeLT): boolea
  * não as citadas como local ("seccionamento ... na SE X") nem reforços em SE existente.
  */
 export function subestacoesDoNome(nome: string): string[] {
-  const t = normalizarTexto(nome).replace(/[–—]/g, '-');
+  // Sem as tensões ("SE ±800 kV/500 kV X", "SE 500/138 kV X").
+  const t = normalizarTexto(nome)
+    .replace(/[–—]/g, '-')
+    .replace(/±|\+-/g, '')
+    .replace(/\d+(?:[.,]\d+)?\s*(?:kv(?:cc|ca)?)?(?:\s*\/\s*\d+(?:[.,]\d+)?\s*(?:kv(?:cc|ca)?)?)*\s*kv(?:cc|ca)?\b\s*/g, '');
   if (/^(reforco|melhoria|ampliacao|adequacao|substituicao)\b/.test(t)) return [];
   const out = new Set<string>();
-  for (const m of t.matchAll(/(?:^|[;,:]\s*|\be\s+|\s-\s+)ses?\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*\s*kv\s+)?([a-z][a-z0-9 ]*?)(?=\s*(?:[,;:(.]|\s-\s|-|\s(?:e|com|para|na|no|em)\s|$))/g)) {
+  for (const m of t.matchAll(/(?:^|[;,:]\s*|\be\s+|\s-\s+)ses?\s+([a-z][a-z0-9 ]*?)(?=\s*(?:[,;:(.]|\s-\s|-|\s(?:e|com|para|na|no|em)\s|$))/g)) {
     const n = normalizarExtremidade(m[1]);
     if (n.length >= 3 && !/^(nova|novas|existente)$/.test(n)) out.add(n);
   }
