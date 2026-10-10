@@ -429,7 +429,17 @@ class Mesclador {
         this.historico(`identificadores.${id.tipo}`, undefined, id.valor);
       }
     }
-    this.escalar('tipo', r.tipo, () => p.tipo, (v) => (p.tipo = v));
+    // Tipo é composição de escopos: LT + SE = LT+SE (não é divergência entre fontes).
+    if (r.tipo && r.tipo !== p.tipo && ['LT', 'SE', 'LT+SE'].includes(r.tipo) && ['LT', 'SE', 'LT+SE'].includes(p.tipo)) {
+      const novo = r.tipo === 'LT+SE' || p.tipo === 'LT+SE' || r.tipo !== p.tipo ? 'LT+SE' : p.tipo;
+      if (novo !== p.tipo) {
+        this.historico('tipo', p.tipo, novo, 'Escopos combinados entre fontes.');
+        p.tipo = novo;
+      }
+      this.proveniencia('tipo', 'reforcar');
+    } else {
+      this.escalar('tipo', r.tipo, () => p.tipo, (v) => (p.tipo = v));
+    }
     this.escalar('setorOrigem', r.setorOrigem, () => p.setorOrigem, (v) => (p.setorOrigem = v));
     this.escalar('subsetor', r.subsetor, () => p.subsetor, (v) => (p.subsetor = v));
     if (r.descricao && !p.descricao) {

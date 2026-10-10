@@ -174,7 +174,10 @@ export function PaginaExecutivo() {
             {riscos.cronogramaApertado.length > 0 && (
               <div className="item">
                 <span className="selo">Cronograma apertado</span>
-                <div>{riscos.cronogramaApertado.map((id) => <div key={id}><Link to={`/empreendimentos/${id}`}>{nomes.get(id) ?? id}</Link></div>)}</div>
+                <div>
+                  {riscos.cronogramaApertado.slice(0, 6).map((id) => <div key={id}><Link to={`/empreendimentos/${id}`}>{nomes.get(id) ?? id}</Link></div>)}
+                  {riscos.cronogramaApertado.length > 6 && <div className="meta">e mais {riscos.cronogramaApertado.length - 6} empreendimento(s) com a RFQ limitada pelo prazo de energização</div>}
+                </div>
               </div>
             )}
           </div>

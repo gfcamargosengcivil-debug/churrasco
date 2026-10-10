@@ -90,6 +90,36 @@ export function poligonosUf(feicoes: FeicaoEpe[]): PoligonoUf[] {
 // --- Conversão de feições --------------------------------------------------------------------------
 
 const texto = (v: unknown) => (v === null || v === undefined ? '' : String(v).trim());
+
+/** Comprimento geodésico aproximado (km) de uma polilinha [lon, lat]. */
+export function comprimentoKm(coords: Coord[]): number {
+  let km = 0;
+  for (let i = 1; i < coords.length; i++) {
+    const [lon1, lat1] = coords[i - 1];
+    const [lon2, lat2] = coords[i];
+    const r = Math.PI / 180;
+    const a = Math.sin(((lat2 - lat1) * r) / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(((lon2 - lon1) * r) / 2) ** 2;
+    km += 2 * 6371 * Math.asin(Math.sqrt(a));
+  }
+  return km;
+}
+
+/**
+ * Valida a extensão informada pela EPE contra o comprimento do traçado: parte das feições traz o
+ * valor em metros. Só converte quando metros→km fica compatível com a geometria; valores
+ * incompatíveis são descartados (com aviso), nunca ajustados livremente.
+ */
+export function extensaoValidada(informada: number | undefined, geometricaKm: number): { km?: number; nota?: string } {
+  if (!informada || informada <= 0) return {};
+  if (geometricaKm > 0.5) {
+    if (informada <= geometricaKm * 4) return { km: informada };
+    const emKm = informada / 1000;
+    if (emKm >= geometricaKm * 0.7 && emKm <= geometricaKm * 3) return { km: emKm, nota: `extensão da fonte (${informada}) interpretada como metros: ${emKm.toFixed(2)} km, compatível com o traçado (${geometricaKm.toFixed(1)} km)` };
+    return { nota: `extensão da fonte (${informada}) incompatível com o traçado (${geometricaKm.toFixed(1)} km): desconsiderada` };
+  }
+  return informada > 3000 ? { nota: `extensão da fonte (${informada}) implausível sem traçado: desconsiderada` } : { km: informada };
+}
+
 function anoValido(v: unknown): number | undefined {
   const n = Math.round(Number(texto(v)));
   return Number.isFinite(n) && n >= 2000 && n <= 2060 ? n : undefined;
@@ -144,11 +174,15 @@ export function registrosLT(feicoes: FeicaoEpe[], ctx: ContextoEpe): { registros
     const ano = anoValido(p.Ano_Planej);
     const trechos: NonNullable<RegistroNormalizado['trechosLT']> = [];
     const ufs = new Set<UF>();
+    const notas: string[] = [];
     let km = 0;
     for (const f of g) {
       const geo = f.geometry;
       const linhas = geo?.type === 'LineString' ? [geo.coordinates] : geo?.type === 'MultiLineString' ? geo.coordinates : [];
-      const ext = normalizarNumero(texto(f.properties.Extensao));
+      const geoKm = linhas.reduce((t, c) => t + comprimentoKm(c), 0);
+      const v = extensaoValidada(normalizarNumero(texto(f.properties.Extensao)), geoKm);
+      const ext = v.km;
+      if (v.nota) notas.push(v.nota);
       if (ext && ext > 0) km += ext;
       for (const coords of linhas) {
         if (coords.length < 2) continue;
@@ -173,7 +207,7 @@ export function registrosLT(feicoes: FeicaoEpe[], ctx: ContextoEpe): { registros
       tipo: 'LT',
       setorOrigem: 'transmissao',
       subsetor: 'transmissao_regulada',
-      descricao: `Expansão planejada (EPE/MME) — ${nome}${ano ? `, entrada em operação prevista para ${ano}` : ', ano de operação não informado'}.`,
+      descricao: `Expansão planejada (EPE/MME) — ${nome}${ano ? `, entrada em operação prevista para ${ano}` : ', ano de operação não informado'}.${notas.length ? ` Observação: ${notas.join('; ')}.` : ''}`,
       organizacoes: agente ? [{ nome: agente, papel: 'concessionaria' }] : undefined,
       ufs: [...ufs],
       tensoesKv: [kv],

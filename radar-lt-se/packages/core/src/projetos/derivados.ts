@@ -56,7 +56,26 @@ export function etapaAtual(p: Empreendimento, etapas: EtapaDef[] = ETAPAS_PADRAO
     const def = ordem.get(st.etapaId);
     if (def && (!atual || def.ordem > atual.ordem)) atual = def;
   }
-  return atual;
+  return atual ?? (ordem.get(etapaInferida(p) ?? '') as EtapaDef | undefined);
+}
+
+/**
+ * Etapa inferida do marco/situação mais avançado quando a fonte não registra o andamento por etapa
+ * (ex.: cadastros oficiais com apenas outorga e prazos). Regra documentada na Metodologia.
+ */
+export function etapaInferida(p: Empreendimento): string | undefined {
+  const real = (tipos: TipoMarco[]) => p.marcos.some((m) => tipos.includes(m.tipo) && m.natureza === 'realizado');
+  if (p.situacaoObra === 'comissionamento' || real(['energizacao', 'operacao_comercial'])) return 'comissionamento';
+  if (['mobilizacao', 'construcao'].includes(p.situacaoObra) || real(['mobilizacao', 'inicio_obras', 'ordem_inicio'])) return 'construcao';
+  if (real(['rfq_publicada', 'propostas_recebidas', 'contrato_execucao_assinado'])) return 'contratacao_execucao';
+  if (real(['contrato_concessao_assinado', 'autorizacao_publicada', 'vencedor_definido', 'leilao_realizado', 'decisao_final_investimento'])) return 'concessao';
+  if (real(['edital_publicado', 'consulta_publica'])) return 'contratacao_regulatoria';
+  if (real(['licenca_previa', 'licenca_instalacao'])) return 'licenciamento';
+  if (['outorgada', 'autorizada'].includes(p.situacoes.regulatoria)) return 'concessao';
+  if (['em_licitacao', 'em_consulta_publica'].includes(p.situacoes.regulatoria)) return 'contratacao_regulatoria';
+  if (p.situacoes.regulatoria === 'em_planejamento' || p.marcos.some((m) => m.tipo === 'inclusao_planejamento')) return 'planejamento';
+  if (real(['anuncio'])) return 'sinal_mercado';
+  return undefined;
 }
 
 export function etapasEmAndamento(p: Empreendimento, etapas: EtapaDef[] = ETAPAS_PADRAO): EtapaDef[] {

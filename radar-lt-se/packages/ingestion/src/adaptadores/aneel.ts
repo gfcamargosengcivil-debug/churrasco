@@ -154,7 +154,9 @@ export function registroSiget(
     const kv = numero(lt?.NumTensaoBaseLinhaTransm) ?? extrairTensoesKv(texto(linha.NomMdl))[0];
     if (!kv) continue;
     const tipoObra = texto(linha.DscTipObr);
-    const construcao = tipoObra === 'Instalação' || tipoObra === 'Seccionamento';
+    // Em seccionamentos os módulos de LT são as linhas resultantes (extensão da linha original
+    // dividida), não o trecho construído: a extensão não é atribuída à obra.
+    const construcao = tipoObra === 'Instalação';
     const km = numero(lt?.NumEtnLinTms);
     if (construcao && km) extensaoNova += km;
     for (const uf of [texto(lt?.SigUFSubestacaoOrigem), texto(lt?.SigUFSubestacaoDestino)]) if (ehUf(uf)) ufs.add(uf);

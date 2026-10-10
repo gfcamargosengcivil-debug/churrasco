@@ -4,6 +4,7 @@
  * a persistência é feita pela "porta" implementada na API.
  */
 import {
+  compararIdentidades, identidadeDoTrecho, identidadesDoNome,
   CONFIGURACAO_PADRAO, RegistroNormalizadoSchema, criarEmpreendimentoDeRegistro, decidirCorrespondencia, detectarMudancas,
   mesclarRegistro, novoId, resumoRegistro, type Coleta, type ConfiguracaoPlataforma, type ContextoMescla, type Empreendimento, type EventoMudanca,
   type Fonte, type MatchCandidato, type Organizacao, type RegistroNormalizado,
@@ -38,6 +39,44 @@ export interface OpcoesProcessamento {
    * novos em vez de ficarem pendentes; os pares semelhantes continuam visíveis em "Possíveis duplicidades".
    */
   semRevisaoManual?: boolean;
+}
+
+/**
+ * Fontes "complementares" (planejamento, lotes de leilão) ao se ligarem a um empreendimento já
+ * documentado por outra fonte só acrescentam o que têm de próprio: identificadores, nomes,
+ * evidência, traçado de trechos correspondentes, localização ausente, participantes, marcos de
+ * tipos ainda sem registro e — quando o registro corresponde inteiramente ao empreendimento —
+ * investimento declarado. Extensão total, tipo e situações não são comparáveis entre parte e todo.
+ */
+export function reduzirParaComplemento(r: RegistroNormalizado, p: Empreendimento): RegistroNormalizado {
+  const idsP = [...[p.nomeOficial, ...p.nomesAlternativos].flatMap(identidadesDoNome), ...p.trechosLT.flatMap(identidadeDoTrecho)];
+  const idsR = [...[r.nome, ...(r.nomesAlternativos ?? [])].flatMap(identidadesDoNome), ...(r.trechosLT ?? []).flatMap(identidadeDoTrecho)];
+  const corresponde = idsR.length > 0 && idsR.every((a) => idsP.some((b) => compararIdentidades(a, b) === 'mesma'));
+  const trechos: NonNullable<RegistroNormalizado['trechosLT']> = [];
+  for (const t of r.trechosLT ?? []) {
+    if (!t.tracado) continue;
+    const [it] = identidadeDoTrecho(t);
+    const alvo = it && p.trechosLT.find((x) => !x.tracado && identidadeDoTrecho(x).some((b) => ['mesma', 'mesmas_extremidades'].includes(compararIdentidades(it, b))));
+    if (alvo) trechos.push({ nome: alvo.nome, tensaoKv: alvo.tensaoKv, corrente: alvo.corrente, tracado: t.tracado });
+  }
+  const tiposComMarco = new Set(p.marcos.map((m) => m.tipo));
+  const temEnergizacao = p.marcos.some((m) => ['energizacao', 'operacao_comercial', 'prazo_contratual_energizacao'].includes(m.tipo));
+  return {
+    fonteId: r.fonteId,
+    chaveExterna: r.chaveExterna,
+    nome: r.nome,
+    nomesAlternativos: r.nomesAlternativos,
+    identificadores: r.identificadores,
+    organizacoes: r.organizacoes,
+    ufs: r.ufs,
+    ponto: p.localizacao.ponto ? undefined : r.ponto,
+    trechosLT: trechos.length ? trechos : undefined,
+    marcos: (r.marcos ?? []).filter((m) => !tiposComMarco.has(m.tipo) && !(temEnergizacao && ['energizacao', 'operacao_comercial', 'prazo_contratual_energizacao'].includes(m.tipo))),
+    capexInfraEletricaBRL: corresponde ? r.capexInfraEletricaBRL : undefined,
+    rapAnualBRL: corresponde ? r.rapAnualBRL : undefined,
+    evidencia: r.evidencia,
+    statusDado: r.statusDado,
+  };
 }
 
 export async function processarRegistros(registros: RegistroNormalizado[], op: OpcoesProcessamento): Promise<{ coleta: Coleta; eventos: EventoMudanca[]; empreendimentosAfetados: string[] }> {
@@ -99,7 +138,9 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
         const idx = projetos.findIndex((p) => p.id === decisao.empreendimentoId);
         if (idx < 0) throw new Error(`Empreendimento ${decisao.empreendimentoId} não encontrado`);
         antes = projetos[idx];
-        resultado = mesclarRegistro(antes, r, ctx);
+        const outraFonte = antes.evidencias.some((e) => e.fonteId !== op.fonte.id);
+        const complementar = (op.fonte.config as { papelMescla?: string }).papelMescla === 'complementar' && outraFonte;
+        resultado = mesclarRegistro(antes, complementar ? reduzirParaComplemento(r, antes) : r, ctx);
         if (!resultado.mudou) {
           // Mesmo sem mudança de dados, a confirmação (última confirmação da evidência) é registrada.
           await op.porta.salvarEmpreendimento(resultado.projeto, antes);

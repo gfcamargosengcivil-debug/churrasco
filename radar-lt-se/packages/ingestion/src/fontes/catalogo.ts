@@ -82,7 +82,7 @@ export const CATALOGO_FONTES: Fonte[] = [
     frequencia: 'mensal',
     statusIntegracao: 'implementado_nao_validado',
     adaptador: 'aneel_leiloes_transmissao',
-    config: { baseUrl: 'https://dadosabertos.aneel.gov.br', pacote: 'resultado-de-leiloes', mesesLeilaoAssinatura: 3 },
+    config: { baseUrl: 'https://dadosabertos.aneel.gov.br', pacote: 'resultado-de-leiloes', mesesLeilaoAssinatura: 3, papelMescla: 'complementar' },
     credenciais: [],
     limitacoes: [
       'O conjunto traz lotes já leiloados (resultado); editais e lotes de leilões futuros continuam por importação de planilha/documento.',
@@ -175,7 +175,7 @@ export const CATALOGO_FONTES: Fonte[] = [
     frequencia: 'mensal',
     statusIntegracao: 'implementado_nao_validado',
     adaptador: 'epe_webmap',
-    config: { servicoUrl: 'https://gisepeprd2.epe.gov.br/arcgis/rest/services/SMA/WMS_Webmap_EPE/MapServer', camadaLT: 10, camadaSE: 9, camadaUF: 23 },
+    config: { servicoUrl: 'https://gisepeprd2.epe.gov.br/arcgis/rest/services/SMA/WMS_Webmap_EPE/MapServer', camadaLT: 10, camadaSE: 9, camadaUF: 23, papelMescla: 'complementar' },
     credenciais: [],
     limitacoes: [
       'Geometrias de planejamento são indicativas: traçados registrados como "aproximado_digitalizado" e SEs com localização "aproximada", nunca como traçado executivo.',

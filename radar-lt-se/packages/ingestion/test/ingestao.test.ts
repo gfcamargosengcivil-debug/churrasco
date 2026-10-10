@@ -124,6 +124,34 @@ describe('pipeline de ingestão', () => {
     expect(porta.matches[0].candidatos[0].empreendimentoId).toBe(porta.projetos[0].id);
   });
 
+  it('fonte complementar só acrescenta traçado/identificadores a empreendimento de outra fonte', async () => {
+    const porta = new PortaMemoria();
+    const siget = {
+      fonteId: 'aneel-siget', chaveExterna: 'siget:1', nome: 'LT 500 kV Alfa - Beta C1', tipo: 'LT' as const, tensoesKv: [500], ufs: ['MG' as const], extensaoKm: 120,
+      situacoes: { regulatoria: 'outorgada' as const },
+      trechosLT: [{ nome: 'LT 500 kV ALFA /BETA C-1 MG', tensaoKv: 500, corrente: 'CA' as const, extensaoKm: 120, origem: 'ALFA', destino: 'BETA' }],
+      marcos: [{ tipo: 'operacao_comercial' as const, data: '2027-06-30', natureza: 'previsto_oficial' as const }],
+      evidencia: { titulo: 'SIGET', tipoDocumento: 'planilha' as const },
+    };
+    await processarRegistros([siget], { porta, fonte: fonte('aneel-siget'), coleta: novaColeta('aneel-siget', 'agendado'), por: 't' });
+    const epe = {
+      fonteId: 'epe-webmap', chaveExterna: 'epe:lt:alfa', nome: 'LT 500 kV Alfa - Beta, C1', tipo: 'LT' as const, tensoesKv: [500], ufs: ['MG' as const], extensaoKm: 3,
+      situacoes: { regulatoria: 'em_planejamento' as const },
+      trechosLT: [{ nome: 'LT 500 kV Alfa - Beta, C1', tensaoKv: 500, corrente: 'CA' as const, extensaoKm: 3, tracado: { coordenadas: [[-44, -19], [-43, -18]] as [number, number][], natureza: 'aproximado_digitalizado' as const } }],
+      marcos: [{ tipo: 'energizacao' as const, data: '2029-12-31', natureza: 'previsto_oficial' as const }],
+      evidencia: { titulo: 'EPE', tipoDocumento: 'relatorio_planejamento' as const },
+    };
+    const r = await processarRegistros([epe], { porta, fonte: fonte('epe-webmap'), coleta: novaColeta('epe-webmap', 'agendado'), por: 't', semRevisaoManual: true });
+    expect(r.coleta).toMatchObject({ criados: 0, conflitos: 0 });
+    const p = porta.projetos[0];
+    expect(porta.projetos).toHaveLength(1);
+    expect(p.situacoes.regulatoria).toBe('outorgada');
+    expect(p.trechosLT).toHaveLength(1);
+    expect(p.trechosLT[0]).toMatchObject({ extensaoKm: 120, tracado: { natureza: 'aproximado_digitalizado' } });
+    expect(p.marcos.map((m) => m.tipo)).toEqual(['operacao_comercial']);
+    expect(p.identificadores).toContainEqual(expect.objectContaining({ tipo: 'chave_fonte', valor: 'epe-webmap|epe:lt:alfa' }));
+  });
+
   it('sem revisor: incerto vira novo (sinalizado); recoleta pela chave da fonte não duplica', async () => {
     const porta = new PortaMemoria();
     const base = { fonteId: 'manual', nome: 'LT 500 kV Teste A – Teste B', tensoesKv: [500], ufs: ['MG' as const], evidencia: { titulo: 'Registro de teste', tipoDocumento: 'registro_manual' as const } };
