@@ -212,6 +212,7 @@ export const IdentificadorSchema = z.object({
   tipo: z.enum([
     'aneel_leilao_lote', 'aneel_rea', 'aneel_contrato_concessao', 'aneel_ceg', 'epe_pet',
     'ons_par', 'mme_potee', 'licenca_ambiental', 'processo_ambiental', 'cnpj_spe', 'interno', 'outro',
+    'aneel_siget_empreendimento', 'ons_empreendimento',
   ]),
   valor: z.string().min(1),
   evidenciaId: z.string().optional(),

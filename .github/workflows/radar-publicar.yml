@@ -1,0 +1,129 @@
+# Radar LT/SE — coleta diária das fontes públicas e publicação no GitHub Pages (/radar/).
+#
+# - Coleta: ANEEL SIGET, ANEEL resultado de leilões de transmissão e EPE WebMap (internet aberta
+#   do runner). Falha de uma fonte não derruba a publicação: fica registrada e os dados anteriores
+#   são mantidos.
+# - Estado (base + histórico + eventos) persiste comprimido na branch "radar-dados" (um único
+#   commit, substituído a cada execução, para não inflar o repositório).
+# - Publicação: o site existente (churrasco.html, churrasco-pmo/) é mantido na raiz e o Radar vai
+#   para /radar/. Requer Settings → Pages → Source = "GitHub Actions".
+# - Em outras branches a execução só valida (coleta + build + artefato), sem gravar estado nem publicar.
+name: Radar LT/SE — coleta e publicação
+
+on:
+  schedule:
+    - cron: '17 9 * * *' # diariamente, 06:17 em Brasília
+  workflow_dispatch:
+  push:
+    branches: [main, claude/plataforma-inteligencia-comercial-ltse-22eyph]
+    paths: [radar-lt-se/**, .github/workflows/radar-publicar.yml]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: radar-publicar-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: radar-lt-se
+    env:
+      PRINCIPAL: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: radar-lt-se/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: Testes
+        run: npm test
+
+      - name: Recuperar estado anterior (branch radar-dados)
+        if: env.PRINCIPAL == 'true'
+        run: |
+          mkdir -p data
+          if git fetch --depth=1 origin radar-dados 2>/dev/null; then
+            git show FETCH_HEAD:estado.json.gz | gunzip > data/estado.json
+            echo "Estado anterior: $(du -h data/estado.json | cut -f1)"
+          else
+            echo "Sem estado anterior: primeira coleta."
+          fi
+
+      - name: Compilar front (modo publicado)
+        run: npm run publicar:web
+
+      - name: Coletar fontes e gerar dados publicados
+        run: |
+          npx tsx scripts/publicar-estatico.ts \
+            --estado data/estado.json \
+            --saida apps/web/dist-estatico \
+            --coletar aneel-siget,aneel-leiloes-transmissao,epe-webmap | tee coleta.log
+          {
+            echo "## Radar LT/SE — coleta"
+            echo '```'
+            grep -E '^\[(coleta|publicação)\]|^   (aviso|ERRO)' coleta.log | head -80
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resumo dos dados publicados
+        run: npx tsx scripts/resumo-publicacao.ts apps/web/dist-estatico | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Gravar estado (branch radar-dados)
+        if: env.PRINCIPAL == 'true'
+        run: |
+          gzip -9 -c data/estado.json > /tmp/estado.json.gz
+          cd "$(mktemp -d)"
+          git init -q -b radar-dados
+          cp /tmp/estado.json.gz .
+          printf '# Estado do Radar LT/SE\n\nBase coletada automaticamente (substituída a cada execução do workflow "Radar LT/SE — coleta e publicação"). Não editar.\n' > README.md
+          git add -A
+          git -c user.name="radar-lt-se[bot]" -c user.email="radar-lt-se@users.noreply.github.com" commit -q -m "Estado da coleta $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" radar-dados
+
+      - name: Montar site (portal existente + /radar/)
+        working-directory: .
+        run: |
+          mkdir -p _site
+          cp churrasco.html _site/
+          cp -r churrasco-pmo _site/
+          cp -r radar-lt-se/apps/web/dist-estatico _site/radar
+          touch _site/.nojekyll
+          du -sh _site _site/radar
+
+      - name: Enviar artefato do Pages
+        if: env.PRINCIPAL == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Enviar artefato de validação
+        if: env.PRINCIPAL != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: radar-publicado
+          path: _site
+          retention-days: 7
+
+  publicar:
+    if: github.ref == 'refs/heads/main'
+    needs: coletar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}radar/
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

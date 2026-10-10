@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { Carregando } from './componentes/base';
-import { useApi } from './lib/api';
+import { ESTATICO, useApi } from './lib/api';
+import { dataHoraBR } from './lib/formatos';
 import { TelaLogin, useAuth } from './lib/auth';
 import { PaginaAlertas } from './paginas/Alertas';
 import { PaginaClienteFicha, PaginaClientes } from './paginas/Clientes';
@@ -22,6 +23,31 @@ interface Eu {
   email?: string;
   nome?: string;
   papel: 'admin' | 'analista' | 'comercial' | 'leitor';
+}
+
+/** Metadados da versão publicada (gerados pela coleta automática). */
+interface Publicacao {
+  geradoEm: string;
+  coletas: { fonteId: string; fonte: string; status: string; registrosLidos: number; criados: number; atualizados: number; erros: string[] }[];
+  empreendimentos: number;
+  demo?: boolean;
+}
+
+function AvisoPublicacao({ p }: { p: Publicacao }) {
+  const falhas = p.coletas.filter((c) => c.status === 'erro');
+  return (
+    <div className="aviso info" role="note">
+      <strong>Versão publicada — somente consulta.</strong>{' '}
+      {p.demo ? <>{p.empreendimentos} empreendimentos de DEMONSTRAÇÃO (fictícios), gerados em {dataHoraBR(p.geradoEm)}.</> : (
+        <>
+          {p.empreendimentos} empreendimentos de fontes públicas; atualização em {dataHoraBR(p.geradoEm)}
+          {p.coletas.length ? <> ({p.coletas.filter((c) => c.status !== 'erro').map((c) => c.fonte).join('; ') || 'nenhuma fonte respondeu'})</> : ' (sem coleta automática nesta publicação)'}.
+        </>
+      )}
+      {falhas.length > 0 && <> Sem resposta nesta coleta: {falhas.map((c) => c.fonte).join('; ')} — dados anteriores mantidos.</>}
+      {' '}Datas calculadas são estimativas da plataforma, não compromissos dos empreendedores.
+    </div>
+  );
 }
 
 const NAV: { grupo?: string; para: string; rotulo: string; icone: string }[] = [
@@ -58,6 +84,7 @@ export function App() {
   const autenticado = modo === 'dev' || !!sessao;
   const { dados: eu } = useApi<Eu>(autenticado ? '/eu' : null);
   const { dados: naoLidas } = useApi<unknown[]>(autenticado ? `/alertas/notificacoes?lido=0&p=${encodeURIComponent(local.pathname)}` : null);
+  const { dados: publicacao } = useApi<Publicacao>(ESTATICO ? '/publicacao' : null);
 
   if (carregando) return <Carregando />;
   if (!autenticado) return <TelaLogin />;
@@ -86,8 +113,14 @@ export function App() {
           </div>
         ))}
         <div className="lateral-rodape">
-          <div>{eu ? `${eu.email ?? eu.nome ?? eu.id} · ${eu.papel}` : '…'}</div>
-          {modo === 'dev' && <div style={{ color: 'var(--atencao-texto)' }}>Modo desenvolvimento (sem login)</div>}
+          {ESTATICO ? (
+            <div>Versão publicada · somente consulta{publicacao && <><br />Dados de {dataHoraBR(publicacao.geradoEm)}</>}</div>
+          ) : (
+            <>
+              <div>{eu ? `${eu.email ?? eu.nome ?? eu.id} · ${eu.papel}` : '…'}</div>
+              {modo === 'dev' && <div style={{ color: 'var(--atencao-texto)' }}>Modo desenvolvimento (sem login)</div>}
+            </>
+          )}
           <div className="flex" style={{ marginTop: 8 }}>
             <button className="botao peq" onClick={alternarTema}>Tema claro/escuro</button>
             {modo === 'supabase' && <button className="botao peq" onClick={() => void sair()}>Sair</button>}
@@ -100,6 +133,7 @@ export function App() {
           <strong>Radar LT/SE</strong>
         </div>
         <main className="conteudo">
+          {ESTATICO && publicacao && <AvisoPublicacao p={publicacao} />}
           <Routes>
             <Route path="/" element={<PaginaExecutivo />} />
             <Route path="/radar" element={<PaginaRadar />} />

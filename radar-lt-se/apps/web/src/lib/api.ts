@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { arquivoEstatico } from '@radar/core';
 import { obterToken } from './auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
+/**
+ * Publicação estática (GitHub Pages): sem servidor; cada consulta GET é lida de um JSON gerado na
+ * coleta diária (scripts/publicar-estatico.ts). Escritas são recusadas — a versão publicada é
+ * somente leitura.
+ */
+export const ESTATICO = import.meta.env.VITE_ESTATICO === '1';
+const MSG_SOMENTE_LEITURA = 'Versão publicada somente para consulta. Para editar, importar ou registrar a gestão comercial, use a instalação com servidor (ver README).';
+
+const erroSomenteLeitura = () => Promise.reject(new ErroApi(403, MSG_SOMENTE_LEITURA));
 
 export class ErroApi extends Error {
   constructor(public status: number, mensagem: string, public detalhes?: unknown) {
@@ -32,14 +43,18 @@ async function tratar<T>(r: Response): Promise<T> {
 }
 
 export const api = {
-  get: <T>(caminho: string) => fetch(`${BASE}/api${caminho}`, { headers: cabecalhos() }).then((r) => tratar<T>(r)),
-  enviar: <T>(metodo: 'POST' | 'PUT' | 'DELETE', caminho: string, corpo?: unknown) =>
-    fetch(`${BASE}/api${caminho}`, {
+  get: <T>(caminho: string) =>
+    ESTATICO
+      ? fetch(arquivoEstatico(caminho)).then((r) => (r.status === 404 ? Promise.reject(new ErroApi(404, 'Informação não incluída na versão publicada.')) : tratar<T>(r)))
+      : fetch(`${BASE}/api${caminho}`, { headers: cabecalhos() }).then((r) => tratar<T>(r)),
+  enviar: <T>(metodo: 'POST' | 'PUT' | 'DELETE', caminho: string, corpo?: unknown): Promise<T> =>
+    ESTATICO ? erroSomenteLeitura() : fetch(`${BASE}/api${caminho}`, {
       method: metodo,
       headers: cabecalhos(corpo !== undefined ? { 'Content-Type': 'application/json' } : {}),
       body: corpo !== undefined ? JSON.stringify(corpo) : undefined,
     }).then((r) => tratar<T>(r)),
-  upload: <T>(caminho: string, arquivo: File, campos: Record<string, string> = {}) => {
+  upload: <T>(caminho: string, arquivo: File, campos: Record<string, string> = {}): Promise<T> => {
+    if (ESTATICO) return erroSomenteLeitura();
     const fd = new FormData();
     for (const [k, v] of Object.entries(campos)) fd.append(k, v);
     fd.append('arquivo', arquivo);
@@ -47,7 +62,7 @@ export const api = {
   },
   /** Baixa um arquivo autenticado (exportações). */
   baixar: async (caminho: string, nome: string) => {
-    const r = await fetch(`${BASE}/api${caminho}`, { headers: cabecalhos() });
+    const r = ESTATICO ? await fetch(arquivoEstatico(caminho)) : await fetch(`${BASE}/api${caminho}`, { headers: cabecalhos() });
     if (!r.ok) throw new ErroApi(r.status, `Falha ao baixar (${r.status})`);
     const url = URL.createObjectURL(await r.blob());
     const a = document.createElement('a');

@@ -2,6 +2,7 @@ export * from './constantes.js';
 export * from './tipos.js';
 export * from './util/datas.js';
 export * from './util/ids.js';
+export * from './util/publicacao.js';
 export * from './normalizacao/index.js';
 export * from './config/etapas.js';
 export * from './config/parametros.js';

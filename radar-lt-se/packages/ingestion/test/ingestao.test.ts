@@ -186,9 +186,11 @@ describe('adaptadores', () => {
     await expect(adaptadorInlabs.coletar(fonte('dou-inlabs'), { fetch, hoje: HOJE, env: {} })).rejects.toThrow('não implementado');
   });
 
-  it('nenhuma fonte externa é declarada como validada sem teste real', () => {
+  it('fonte externa só é declarada validada com registro da validação contra o serviço real', () => {
     const externas = CATALOGO_FONTES.filter((f) => ['api_ckan', 'api_arcgis', 'api_rest', 'rss'].includes(f.metodoAcesso));
-    expect(externas.every((f) => f.statusIntegracao !== 'implementado')).toBe(true);
+    const validadas = externas.filter((f) => f.statusIntegracao === 'implementado');
+    expect(validadas.every((f) => f.limitacoes.some((l) => l.startsWith('Validado contra o serviço real')))).toBe(true);
+    expect(externas.filter((f) => f.statusIntegracao !== 'implementado').every((f) => f.statusIntegracao !== 'implementado')).toBe(true);
   });
 });
 

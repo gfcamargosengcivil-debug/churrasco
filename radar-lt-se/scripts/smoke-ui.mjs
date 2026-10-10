@@ -4,12 +4,15 @@
  * e salva capturas de tela para inspeção visual.
  *
  * Uso: com API e web em execução →  BASE_URL=http://localhost:5173 npm run test:ui
+ *      versão publicada (estática) →  HASH=1 BASE_URL=http://host/caminho/ npm run test:ui
  * Navegador: CHROMIUM_PATH (padrão: Chromium do Playwright em PLAYWRIGHT_BROWSERS_PATH).
  */
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:5173';
+// HASH=1: versão publicada (rotas com #, ex.: GitHub Pages).
+const url = (rota) => (process.env.HASH === '1' ? `${BASE.replace(/\/?$/, '/')}#${rota}` : `${BASE}${rota}`);
 const SAIDA = process.env.SAIDA ?? 'test-results/ui';
 const EXEC = process.env.CHROMIUM_PATH ?? `${process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/opt/pw-browsers'}/chromium-1194/chrome-linux/chrome`;
 const ROTAS = [
@@ -43,8 +46,8 @@ for (const tema of ['light', 'dark']) {
     const rotas = largura === 1440 ? ROTAS : ROTAS.slice(0, 3);
     for (const [rota, titulo] of rotas) {
       erros.length = 0;
-      await pagina.goto(`${BASE}${rota}`, { waitUntil: 'networkidle' });
-      const ok = await pagina.getByRole('heading', { level: 1, name: titulo }).isVisible().catch(() => false);
+      await pagina.goto(url(rota), { waitUntil: 'networkidle' });
+      const ok = await pagina.getByRole('heading', { level: 1, name: titulo }).waitFor({ timeout: 15000 }).then(() => true, () => false);
       const nome = `${tema}-${largura}${rota.replace(/\//g, '_') || '_inicio'}`;
       await pagina.screenshot({ path: `${SAIDA}/${nome}.png`, fullPage: largura === 1440 });
       const larguraDoc = await pagina.evaluate(() => document.documentElement.scrollWidth);
@@ -54,7 +57,7 @@ for (const tema of ['light', 'dark']) {
     }
     if (largura === 1440) {
       // Ficha do primeiro empreendimento do radar, todas as abas.
-      await pagina.goto(`${BASE}/radar`, { waitUntil: 'networkidle' });
+      await pagina.goto(url('/radar'), { waitUntil: 'networkidle' });
       const link = pagina.locator('td.nome a, .nome a').first();
       await link.click();
       await pagina.waitForLoadState('networkidle');

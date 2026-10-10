@@ -21,6 +21,12 @@ export type DecisaoCorrespondencia =
   | { acao: 'revisar'; candidatos: Correspondencia[] }
   | { acao: 'novo'; candidatos: Correspondencia[] };
 
+/**
+ * Identificadores que um empreendimento tem no máximo uma vez: valores diferentes do mesmo tipo
+ * provam que são empreendimentos distintos (ex.: dois reforços na mesma SE com códigos SIGET próprios).
+ */
+const TIPOS_EXCLUSIVOS: Identificador['tipo'][] = ['aneel_siget_empreendimento', 'ons_empreendimento', 'aneel_leilao_lote', 'aneel_ceg'];
+
 const chaveIdentificador = (i: Pick<Identificador, 'tipo' | 'valor'>) => `${i.tipo}:${normalizarTexto(i.valor).replace(/[^a-z0-9]/g, '')}`;
 
 export function pontuarCorrespondencia(
@@ -35,6 +41,12 @@ export function pontuarCorrespondencia(
   const idComum = r.identificadores?.find((i) => idsProj.has(chaveIdentificador(i)));
   if (idComum) {
     return { empreendimentoId: p.id, pontuacao: 1, motivos: [`Identificador oficial coincidente (${idComum.tipo}: ${idComum.valor}).`] };
+  }
+  const idConflitante = r.identificadores?.find(
+    (i) => TIPOS_EXCLUSIVOS.includes(i.tipo) && p.identificadores.some((x) => x.tipo === i.tipo && chaveIdentificador(x) !== chaveIdentificador(i)),
+  );
+  if (idConflitante) {
+    return { empreendimentoId: p.id, pontuacao: 0, motivos: [`Identificadores oficiais distintos do mesmo tipo (${idConflitante.tipo}).`] };
   }
 
   let score = 0;
