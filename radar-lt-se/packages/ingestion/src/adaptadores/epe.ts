@@ -168,7 +168,7 @@ export function registrosLT(feicoes: FeicaoEpe[], ctx: ContextoEpe): { registros
     const agente = agenteValido(p.Concession);
     registros.push({
       fonteId: ctx.fonte.id,
-      chaveExterna: `epe:lt:${normalizarTexto(nome)}:${ano ?? 's-ano'}`,
+      chaveExterna: `epe:lt:${normalizarTexto(nome)}:${kv}`,
       nome,
       tipo: 'LT',
       setorOrigem: 'transmissao',
@@ -256,3 +256,81 @@ export const adaptadorEpeWebmap: Adaptador = {
     return { registros, sinais: [], avisos: avisos.slice(0, 200), lidos: lts.length + ses.length };
   },
 };
+
+// --- Localização por subestação homônima -------------------------------------------------------------
+
+export interface EntradaSE {
+  nome: string;
+  uf?: UF;
+  lon: number;
+  lat: number;
+  base: 'existente' | 'planejada';
+}
+
+export const chaveNomeSE = (s: string) =>
+  normalizarTexto(s)
+    .replace(/^(se|sub|subestacao)\s+/, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Índice de subestações do WebMap EPE (base existente e expansão planejada) por nome normalizado,
+ * com a UF obtida pela geometria. Usado para localizar obras de fontes sem coordenadas.
+ */
+export async function carregarIndiceSE(
+  f: typeof fetch,
+  servico = SERVICO_PADRAO,
+  camadas: { existente: number; planejada: number; uf: number } = { existente: 20, planejada: 9, uf: 23 },
+): Promise<Map<string, EntradaSE[]>> {
+  const base = servico.replace(/\/$/, '');
+  const [exist, plan, ufsF] = await Promise.all([
+    consultar(f, `${base}/${camadas.existente}`),
+    consultar(f, `${base}/${camadas.planejada}`),
+    consultar(f, `${base}/${camadas.uf}`, '*', 0.01),
+  ]);
+  const ufs = poligonosUf(ufsF);
+  const indice = new Map<string, EntradaSE[]>();
+  for (const [feicoes, tipo] of [[exist, 'existente'], [plan, 'planejada']] as const) {
+    for (const ft of feicoes) {
+      const g = ft.geometry;
+      const nome = texto(ft.properties.Nome ?? ft.properties.NOME ?? ft.properties.nome);
+      if (!nome || g?.type !== 'Point') continue;
+      const k = chaveNomeSE(nome);
+      if (!k) continue;
+      indice.set(k, [...(indice.get(k) ?? []), { nome, uf: ufDoPonto(g.coordinates, ufs), lon: g.coordinates[0], lat: g.coordinates[1], base: tipo }]);
+    }
+  }
+  return indice;
+}
+
+/**
+ * Atribui ponto a registros sem coordenadas a partir das SEs citadas (nome + UF). Só usa
+ * correspondências inequívocas: mesmo nome normalizado e UF compatível com o registro; havendo mais
+ * de uma SE possível, não localiza. A precisão é "subestacao" (base existente) ou "aproximada"
+ * (SE planejada), e a origem fica registrada em `ponto.fonte`.
+ */
+export function localizarPorSubestacao(registros: RegistroNormalizado[], indice: Map<string, EntradaSE[]>, nomesSE: (r: RegistroNormalizado) => string[]): number {
+  let localizados = 0;
+  for (const r of registros) {
+    if (r.ponto) continue;
+    const ufsReg = new Set(r.ufs ?? []);
+    for (const nome of nomesSE(r)) {
+      const cands = (indice.get(chaveNomeSE(nome)) ?? []).filter((e) => (ufsReg.size ? !!e.uf && ufsReg.has(e.uf) : true));
+      const existentes = cands.filter((e) => e.base === 'existente');
+      const escolhidos = existentes.length ? existentes : cands;
+      if (escolhidos.length !== 1 || (!ufsReg.size && cands.length !== 1)) continue;
+      const e = escolhidos[0];
+      r.ponto = {
+        lon: e.lon,
+        lat: e.lat,
+        precisao: e.base === 'existente' ? 'subestacao' : 'aproximada',
+        fonte: `EPE WebMap — SE ${e.base} "${e.nome}" (correspondência por nome e UF com a SE citada: "${nome}")`,
+      };
+      if (!r.ufs?.length && e.uf) r.ufs = [e.uf];
+      localizados++;
+      break;
+    }
+  }
+  return localizados;
+}

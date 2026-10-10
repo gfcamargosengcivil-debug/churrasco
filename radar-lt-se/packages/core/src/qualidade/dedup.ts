@@ -26,6 +26,12 @@ export type DecisaoCorrespondencia =
  * provam que são empreendimentos distintos (ex.: dois reforços na mesma SE com códigos SIGET próprios).
  */
 const TIPOS_EXCLUSIVOS: Identificador['tipo'][] = ['aneel_siget_empreendimento', 'ons_empreendimento', 'aneel_leilao_lote', 'aneel_ceg'];
+/**
+ * Coincidência decisiva só para identificadores do próprio empreendimento. Contrato de concessão,
+ * resolução autorizativa e códigos de plano costumam abranger vários empreendimentos: somam pontos
+ * na correspondência, mas não a decidem sozinhos.
+ */
+const TIPOS_DECISIVOS: Identificador['tipo'][] = [...TIPOS_EXCLUSIVOS, 'chave_fonte', 'licenca_ambiental', 'processo_ambiental', 'interno'];
 
 const chaveIdentificador = (i: Pick<Identificador, 'tipo' | 'valor'>) => `${i.tipo}:${normalizarTexto(i.valor).replace(/[^a-z0-9]/g, '')}`;
 
@@ -36,17 +42,19 @@ export function pontuarCorrespondencia(
   cfg: ConfigDedup = CONFIG_DEDUP_PADRAO,
 ): Correspondencia {
   const motivos: string[] = [];
-  // Identificador oficial coincidente é decisivo.
-  const idsProj = new Set(p.identificadores.map(chaveIdentificador));
-  const idComum = r.identificadores?.find((i) => idsProj.has(chaveIdentificador(i)));
-  if (idComum) {
-    return { empreendimentoId: p.id, pontuacao: 1, motivos: [`Identificador oficial coincidente (${idComum.tipo}: ${idComum.valor}).`] };
-  }
+  // Identificadores exclusivos diferentes do mesmo tipo provam que são empreendimentos distintos.
   const idConflitante = r.identificadores?.find(
     (i) => TIPOS_EXCLUSIVOS.includes(i.tipo) && p.identificadores.some((x) => x.tipo === i.tipo && chaveIdentificador(x) !== chaveIdentificador(i)),
   );
   if (idConflitante) {
     return { empreendimentoId: p.id, pontuacao: 0, motivos: [`Identificadores oficiais distintos do mesmo tipo (${idConflitante.tipo}).`] };
+  }
+  // Identificador oficial do próprio empreendimento coincidente é decisivo.
+  const idsProj = new Set(p.identificadores.map(chaveIdentificador));
+  const comuns = (r.identificadores ?? []).filter((i) => idsProj.has(chaveIdentificador(i)));
+  const idDecisivo = comuns.find((i) => TIPOS_DECISIVOS.includes(i.tipo));
+  if (idDecisivo) {
+    return { empreendimentoId: p.id, pontuacao: 1, motivos: [`Identificador oficial coincidente (${idDecisivo.tipo}: ${idDecisivo.valor}).`] };
   }
 
   let score = 0;
@@ -56,6 +64,10 @@ export function pontuarCorrespondencia(
   for (const a of nomesReg) for (const b of nomesProj) simNome = Math.max(simNome, similaridadeNomes(a, b));
   score += 0.45 * simNome;
   motivos.push(`Similaridade de nome ${Math.round(simNome * 100)}%.`);
+  if (comuns.length) {
+    score += 0.1;
+    motivos.push(`Identificador compartilhado (${comuns.map((i) => `${i.tipo}: ${i.valor}`).join(', ')}) — pode abranger vários empreendimentos.`);
+  }
 
   const kvReg = r.tensoesKv?.length ? Math.max(...r.tensoesKv) : r.trechosLT?.length ? Math.max(...r.trechosLT.map((t) => t.tensaoKv)) : undefined;
   const kvProj = tensaoMaxKv(p);

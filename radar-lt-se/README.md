@@ -121,6 +121,37 @@ npm run worker:prod -w @radar/api
 Toda escrita gera registro de auditoria (`/api/auditoria`); toda alteração de dado gera
 histórico append-only com origem e justificativa.
 
+## Versão publicada com dados reais (GitHub Pages)
+
+O workflow `.github/workflows/radar-publicar.yml` mantém uma versão **somente leitura** do Radar em
+`https://<usuário>.github.io/<repositório>/radar/`, atualizada diariamente (06:17, Brasília):
+
+1. **Coleta** no runner do GitHub (internet aberta) das fontes automáticas validadas:
+   ANEEL SIGET (empreendimentos de transmissão outorgados em andamento/planejados), ANEEL resultado
+   de leilões de transmissão (lotes dos últimos 5 anos) e EPE WebMap (LT/SE da expansão planejada).
+2. **Mescla** com a base anterior (deduplicação, conflitos, histórico e eventos), persistida
+   comprimida na branch `radar-dados` (um commit substituído a cada execução).
+3. **Exportação** de cada consulta da API para JSON (`scripts/publicar-estatico.ts`) e build do front
+   com `VITE_ESTATICO=1` (rotas com `#`, sem servidor).
+4. **Deploy** no Pages mantendo o conteúdo existente do repositório na raiz e o Radar em `/radar/`.
+
+Configuração única: **Settings → Pages → Build and deployment → Source = GitHub Actions**. O
+workflow também pode ser disparado manualmente (Actions → "Radar LT/SE — coleta e publicação" →
+Run workflow). Em branches que não são a `main` ele apenas valida (coleta + build + artefato).
+
+A versão publicada não tem login nem edição (gestão comercial, importações, revisão de
+correspondências e configurações exigem a instalação com servidor). Falha de uma fonte não derruba a
+publicação: o aviso no topo do site informa as fontes sem resposta e os dados anteriores são mantidos.
+
+Execução local equivalente (com acesso às fontes):
+
+```bash
+npm run publicar:web
+npx tsx scripts/publicar-estatico.ts --estado data/estado.json --saida apps/web/dist-estatico \
+  --coletar aneel-siget,aneel-leiloes-transmissao,epe-webmap
+npx tsx scripts/resumo-publicacao.ts apps/web/dist-estatico
+```
+
 ## Operação
 
 - **Importação manual (CSV/XLSX):** Fontes e ingestão → baixar modelo → pré-visualizar → importar.

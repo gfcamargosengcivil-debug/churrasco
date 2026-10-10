@@ -123,6 +123,21 @@ describe('pipeline de ingestão', () => {
     expect(r.coleta, JSON.stringify(r.coleta)).toMatchObject({ paraRevisao: 1 });
     expect(porta.matches[0].candidatos[0].empreendimentoId).toBe(porta.projetos[0].id);
   });
+
+  it('sem revisor: incerto vira novo (sinalizado); recoleta pela chave da fonte não duplica', async () => {
+    const porta = new PortaMemoria();
+    const base = { fonteId: 'manual', nome: 'LT 500 kV Teste A – Teste B', tensoesKv: [500], ufs: ['MG' as const], evidencia: { titulo: 'Registro de teste', tipoDocumento: 'registro_manual' as const } };
+    await processarRegistros([base], { porta, fonte: fonte('manual'), coleta: novaColeta('manual', 'manual'), por: 't' });
+    const incerto = { ...base, chaveExterna: 'x-1', nome: 'LT Teste B - Teste A', tensoesKv: undefined };
+    const r = await processarRegistros([incerto], { porta, fonte: fonte('manual'), coleta: novaColeta('manual', 'manual'), por: 't', semRevisaoManual: true });
+    expect(r.coleta).toMatchObject({ criados: 1, paraRevisao: 0 });
+    expect(r.coleta.avisos.join(' ')).toContain('correspondência incerta');
+    expect(porta.matches).toHaveLength(0);
+    const r2 = await processarRegistros([incerto], { porta, fonte: fonte('manual'), coleta: novaColeta('manual', 'manual'), por: 't', semRevisaoManual: true });
+    expect(r2.coleta.criados).toBe(0);
+    expect(porta.projetos).toHaveLength(2);
+    expect(porta.projetos[1].identificadores).toContainEqual(expect.objectContaining({ tipo: 'chave_fonte', valor: 'manual|x-1' }));
+  });
 });
 
 describe('adaptadores', () => {

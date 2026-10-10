@@ -33,6 +33,11 @@ export interface OpcoesProcessamento {
   filtrarTensao?: boolean;
   /** Força vínculo a um empreendimento (revisão manual decidida pelo usuário). */
   vincularA?: string;
+  /**
+   * Execução sem revisor (publicação automática): correspondências incertas viram empreendimentos
+   * novos em vez de ficarem pendentes; os pares semelhantes continuam visíveis em "Possíveis duplicidades".
+   */
+  semRevisaoManual?: boolean;
 }
 
 export async function processarRegistros(registros: RegistroNormalizado[], op: OpcoesProcessamento): Promise<{ coleta: Coleta; eventos: EventoMudanca[]; empreendimentosAfetados: string[] }> {
@@ -45,6 +50,7 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
   const organizacoes = await op.porta.listarOrganizacoes();
   const orgMap = new Map(organizacoes.map((o) => [o.id, o]));
   const nomeOrg = (id: string) => orgMap.get(id)?.nome;
+  let incertosSemRevisao = 0;
 
   for (const bruto of registros) {
     coleta.registrosLidos++;
@@ -55,6 +61,11 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
       continue;
     }
     const r = parsed.data;
+    // A chave do item na fonte identifica o mesmo registro nas coletas seguintes.
+    if (r.chaveExterna) {
+      const chave = { tipo: 'chave_fonte' as const, valor: `${op.fonte.id}|${r.chaveExterna}` };
+      if (!r.identificadores?.some((i) => i.tipo === chave.tipo && i.valor === chave.valor)) r.identificadores = [...(r.identificadores ?? []), chave];
+    }
     const kv = r.tensoesKv?.length ? Math.max(...r.tensoesKv) : r.trechosLT?.length ? Math.max(...r.trechosLT.map((t) => t.tensaoKv)) : undefined;
     if ((op.filtrarTensao ?? true) && kv !== undefined && kv < cfg.portfolio.tensaoMinimaKv) {
       coleta.descartados++;
@@ -66,7 +77,9 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
       const decisao = op.vincularA
         ? { acao: 'vincular' as const, empreendimentoId: op.vincularA, candidatos: [] }
         : decidirCorrespondencia(r, projetos, orgMap, cfg.dedup);
-      if (decisao.acao === 'revisar') {
+      if (decisao.acao === 'revisar' && op.semRevisaoManual) {
+        incertosSemRevisao++;
+      } else if (decisao.acao === 'revisar') {
         await op.porta.salvarMatchCandidato({
           id: novoId('mt'),
           coletaId: coleta.id,
@@ -112,6 +125,9 @@ export async function processarRegistros(registros: RegistroNormalizado[], op: O
     } catch (e) {
       coleta.erros.push(`"${r.nome}": ${(e as Error).message}`);
     }
+  }
+  if (incertosSemRevisao) {
+    coleta.avisos.push(`${incertosSemRevisao} registro(s) com correspondência incerta cadastrados como novos (execução sem revisor) — conferir em Qualidade → Possíveis duplicidades.`);
   }
   if (eventos.length) await op.porta.registrarEventos(eventos);
   return { coleta, eventos, empreendimentosAfetados: [...afetados] };

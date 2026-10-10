@@ -7,7 +7,8 @@
 #   commit, substituído a cada execução, para não inflar o repositório).
 # - Publicação: o site existente (churrasco.html, churrasco-pmo/) é mantido na raiz e o Radar vai
 #   para /radar/. Requer Settings → Pages → Source = "GitHub Actions".
-# - Em outras branches a execução só valida (coleta + build + artefato), sem gravar estado nem publicar.
+# - Em outras branches a execução só valida (coleta + build + artefato), grava o estado na branch
+#   "radar-validacao" para inspeção e não publica.
 name: Radar LT/SE — coleta e publicação
 
 on:
@@ -81,17 +82,17 @@ jobs:
       - name: Resumo dos dados publicados
         run: npx tsx scripts/resumo-publicacao.ts apps/web/dist-estatico | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Gravar estado (branch radar-dados)
-        if: env.PRINCIPAL == 'true'
+      - name: Gravar estado (radar-dados na main; radar-validacao nas demais branches)
         run: |
+          DESTINO=$([ "$PRINCIPAL" = "true" ] && echo radar-dados || echo radar-validacao)
           gzip -9 -c data/estado.json > /tmp/estado.json.gz
           cd "$(mktemp -d)"
-          git init -q -b radar-dados
+          git init -q -b "$DESTINO"
           cp /tmp/estado.json.gz .
           printf '# Estado do Radar LT/SE\n\nBase coletada automaticamente (substituída a cada execução do workflow "Radar LT/SE — coleta e publicação"). Não editar.\n' > README.md
           git add -A
           git -c user.name="radar-lt-se[bot]" -c user.email="radar-lt-se@users.noreply.github.com" commit -q -m "Estado da coleta $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" radar-dados
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$DESTINO"
 
       - name: Montar site (portal existente + /radar/)
         working-directory: .

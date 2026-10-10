@@ -49,7 +49,7 @@ export class ServicoIngestao {
   }
 
   /** Executa a coleta automática de uma fonte com adaptador (CKAN, ArcGIS, RSS, Querido Diário…). */
-  async executarFonte(fonteId: string, disparo: Coleta['disparo'], usuario?: string): Promise<Coleta> {
+  async executarFonte(fonteId: string, disparo: Coleta['disparo'], usuario?: string, opcoes: { semRevisaoManual?: boolean } = {}): Promise<Coleta> {
     const f = await this.fonte(fonteId);
     const adaptador = ADAPTADORES[f.adaptador];
     if (!adaptador) throw new ErroNegocio(400, `A fonte "${f.nome}" não tem coleta automática (opera por ${f.adaptador}).`);
@@ -60,7 +60,7 @@ export class ServicoIngestao {
       const res = await adaptador.coletar(f, { fetch, hoje: hojeISO(), env: process.env, desde: ultima ? somarDias(ultima, -1) : undefined });
       coleta.avisos.push(...res.avisos);
       const cfg = await this.s.configuracao();
-      await processarRegistros(res.registros, { porta: this.porta, fonte: f, coleta, config: cfg, por: usuario ?? `fonte:${f.id}` });
+      await processarRegistros(res.registros, { porta: this.porta, fonte: f, coleta, config: cfg, por: usuario ?? `fonte:${f.id}`, semRevisaoManual: opcoes.semRevisaoManual });
       coleta.registrosLidos = Math.max(coleta.registrosLidos, res.lidos);
       if (res.sinais.length) {
         const novos = await this.porta.registrarSinais(res.sinais, coleta.id);

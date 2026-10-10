@@ -47,4 +47,10 @@ describe('normalização', () => {
     expect(somarMeses('2025-03-15', -27)).toBe('2022-12-15');
     expect(diferencaDias('2025-01-01', '2025-03-01')).toBe(59);
   });
+  it('tensões combinadas com decimal e hífen', () => {
+    expect(extrairTensoesKv('TR 230/13,8 kV 75 MVA')).toEqual([230, 13.8]);
+    expect(extrairTensoesKv('500/230/13,8 kV')).toEqual([500, 230, 13.8]);
+    expect(extrairTensoesKv('transformador 230-13,8 KV')).toEqual([230, 13.8]);
+    expect(extrairTensoesKv('LT 345 kV Itapeti - Nordeste')).toEqual([345]);
+  });
 });

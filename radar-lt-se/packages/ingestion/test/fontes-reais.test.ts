@@ -5,10 +5,10 @@
  * e de resolução usadas para testar as junções são FICTÍCIAS (mesmas colunas, valores inventados).
  */
 import { describe, expect, it } from 'vitest';
-import type { Fonte } from '@radar/core';
+import type { Fonte, RegistroNormalizado } from '@radar/core';
 import {
   adaptadorEpeWebmap, adaptadorLeiloesTransmissao, adaptadorSiget, CATALOGO_FONTES, registroLeilao, registroSE, registrosLT,
-  subestacoesCitadas, ufDoPonto, ufsDoModulo, type FeicaoEpe, type PoligonoUf,
+  localizarPorSubestacao, subestacoesCitadas, ufDoPonto, ufsDoModulo, type FeicaoEpe, type PoligonoUf,
 } from '../src/index.js';
 
 const HOJE = '2026-10-10';
@@ -198,5 +198,29 @@ describe('EPE WebMap', () => {
     expect(r.lidos).toBe(2);
     expect(r.registros.map((x) => x.nome)).toEqual(['LT 230 kV Paraíso 2 - Chapadão, C3', 'SE Graça Aranha']);
     expect(r.registros[1].ufs).toEqual(['MA']);
+  });
+});
+
+describe('localização pela SE homônima', () => {
+  const base = { fonteId: 'aneel-siget', evidencia: { titulo: 'x', tipoDocumento: 'planilha' as const } };
+  it('localiza só com correspondência inequívoca de nome e UF; prefere a base existente', () => {
+    const indice = new Map([
+      ['ribeirao preto', [{ nome: 'SE Ribeirão Preto', uf: 'SP' as const, lon: -47.8, lat: -21.2, base: 'existente' as const }, { nome: 'SE Ribeirão Preto', uf: 'SP' as const, lon: -47.7, lat: -21.1, base: 'planejada' as const }]],
+      ['campo grande', [{ nome: 'SE Campo Grande', uf: 'MS' as const, lon: -54.6, lat: -20.4, base: 'existente' as const }, { nome: 'SE Campo Grande', uf: 'RJ' as const, lon: -43.5, lat: -22.9, base: 'existente' as const }]],
+      ['dupla', [{ nome: 'SE Dupla', uf: 'GO' as const, lon: -49, lat: -16, base: 'existente' as const }, { nome: 'SE Dupla', uf: 'GO' as const, lon: -49.5, lat: -16.5, base: 'existente' as const }]],
+    ]);
+    const regs: RegistroNormalizado[] = [
+      { ...base, nome: 'Reforço na SE Ribeirão Preto: Instalação do 2º RTB', ufs: ['SP' as const] },
+      { ...base, nome: 'Reforço na SE Campo Grande: novo ATF', ufs: ['RJ' as const] },
+      { ...base, nome: 'Reforço na SE Campo Grande: outro', ufs: [] },
+      { ...base, nome: 'Reforço na SE Dupla: ambígua', ufs: ['GO' as const] },
+    ];
+    const n = localizarPorSubestacao(regs, indice, (r) => subestacoesCitadas(r.nome));
+    expect(n).toBe(2);
+    expect(regs[0].ponto).toMatchObject({ lon: -47.8, precisao: 'subestacao' });
+    expect(regs[0].ponto?.fonte).toContain('correspondência por nome e UF');
+    expect(regs[1].ponto).toMatchObject({ lon: -43.5 });
+    expect(regs[2].ponto).toBeUndefined();
+    expect(regs[3].ponto).toBeUndefined();
   });
 });

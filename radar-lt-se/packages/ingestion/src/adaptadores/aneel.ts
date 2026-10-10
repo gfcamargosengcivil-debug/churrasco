@@ -14,6 +14,7 @@ import {
   extrairTensoesKv, normalizarData, normalizarNumero, normalizarTexto, somarMeses, UFS,
   type Fonte, type RegistroNormalizado, type UF as Uf,
 } from '@radar/core';
+import { carregarIndiceSE, localizarPorSubestacao } from './epe.js';
 import { buscar, type Adaptador, type ContextoAdaptador, type ResultadoAdaptador } from './tipos.js';
 
 type Linha = Record<string, string | number | null>;
@@ -21,6 +22,29 @@ type Linha = Record<string, string | number | null>;
 interface ConfigCkanAneel {
   baseUrl?: string;
   pacote?: string;
+  /** Localiza obras pela SE homônima no WebMap EPE (padrão: sim). */
+  localizarPorSE?: boolean;
+  servicoEpe?: string;
+}
+
+/** SEs citadas pelo registro: nome, descrição e extremidades das LTs. */
+function nomesSEDoRegistro(r: RegistroNormalizado): string[] {
+  return [
+    ...subestacoesCitadas(`${r.nome} ${(r.nomesAlternativos ?? []).join(' ')}`),
+    ...(r.subestacoes ?? []).map((s) => s.nome),
+    ...(r.trechosLT ?? []).flatMap((t) => [t.origem, t.destino]).filter((x): x is string => !!x),
+  ];
+}
+
+async function localizar(registros: RegistroNormalizado[], c: ConfigCkanAneel, ctx: ContextoAdaptador, avisos: string[]) {
+  if (c.localizarPorSE === false || !registros.length) return;
+  try {
+    const indice = await carregarIndiceSE(ctx.fetch, c.servicoEpe);
+    const n = localizarPorSubestacao(registros, indice, nomesSEDoRegistro);
+    avisos.push(`Localização: ${n} de ${registros.length} registros localizados pela SE homônima no WebMap EPE (nome + UF, apenas correspondências inequívocas).`);
+  } catch (e) {
+    avisos.push(`Localização pela SE homônima indisponível (WebMap EPE): ${(e as Error).message}. Registros seguem sem coordenadas.`);
+  }
 }
 
 const BASE_PADRAO = 'https://dadosabertos.aneel.gov.br';
@@ -64,12 +88,13 @@ export function ufsDoModulo(nome: string): Uf[] {
   return m ? m[1].split('/').filter(ehUf) : [];
 }
 
-/** Nomes de SE citados em "Reforço na SE X: ..." / "SE X - ...". */
+/** Nomes de SE citados em textos oficiais ("Reforço na SE X: ...", "SE 500/138 kV X – ...", "a SE X e o ..."). */
 export function subestacoesCitadas(t: string): string[] {
   const nomes = new Set<string>();
-  for (const m of t.matchAll(/\bSE\s+([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 .'´`ºª°-]*?)(?=\s*(?::|;|,|\(|\s[-–]\s|\s+(?:para|com|e|em|de|do|da|no|na)\s|$))/g)) {
-    const n = m[1].trim().replace(/\s+/g, ' ');
-    if (n.length >= 3 && !/^\d+$/.test(n) && !/kv$/i.test(n)) nomes.add(n);
+  const re = /\bSE\s+(?:\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*\s*kV\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .'ºª°]*?)(?=\s*(?:[:;,()–]|-|\s\d+(?:[.,]\d+)?\s*kV\b|\s(?:para|com|e|em|ao|à|via|pelo|pela)\s|$))/gi;
+  for (const m of t.matchAll(re)) {
+    const n = m[1].trim().replace(/\s+/g, ' ').replace(/\.$/, '');
+    if (n.length >= 3 && !/^(nova|existente|associada|seccionadora)s?$/i.test(n)) nomes.add(n);
   }
   return [...nomes];
 }
@@ -170,8 +195,14 @@ export function registroSiget(
     identificadores.push({ tipo: 'aneel_rea', valor: texto(rea.CodReg) || texto(rea.NumAto) });
     regulatoria = 'autorizada';
   } else if (!reforco && !texto(l0.IdeDoc) && contrato) {
+    // O contrato só é a outorga deste escopo se for compatível com o prazo do ato legal (escopos
+    // incluídos anos depois em contratos antigos não têm o ato identificado nesta fonte).
     const dataCcd = data(contrato.DatAsnCcd);
-    if (dataCcd) marcos.push({ tipo: 'contrato_concessao_assinado', data: dataCcd, natureza: 'realizado', descricao: `Contrato de concessão ${texto(contrato.NumCnaCcd)}` });
+    const prazoAto = data(l0.DatCaoCgmAtoLgl);
+    const compativel = !!dataCcd && (prazoAto ? dataCcd >= somarMeses(prazoAto, -84) : dataCcd >= somarMeses(ctx.hoje, -96));
+    if (dataCcd && compativel) {
+      marcos.push({ tipo: 'contrato_concessao_assinado', data: dataCcd, natureza: 'realizado', descricao: `Contrato de concessão ${texto(contrato.NumCnaCcd)}` });
+    }
     regulatoria = 'outorgada';
   } else if (situacao === 'Planejado') {
     regulatoria = 'em_planejamento';
@@ -290,6 +321,7 @@ export const adaptadorSiget: Adaptador = {
       if ('erro' in r) avisos.push(r.erro);
       else registros.push(r);
     }
+    await localizar(registros, c, ctx, avisos);
     avisos.push(`SIGET: ${linhas.length} módulos lidos (carga de ${recEpd.modificado?.slice(0, 10) ?? '?'}); ${porEpd.size} empreendimentos em andamento/planejados ou concluídos nos últimos ${diasRecentes} dias.`);
     return { registros, sinais: [], avisos, lidos: linhas.length };
   },
@@ -388,6 +420,7 @@ export const adaptadorLeiloesTransmissao: Adaptador = {
       if ('erro' in r) avisos.push(r.erro);
       else registros.push(r);
     }
+    await localizar(registros, c, ctx, avisos);
     const ultimo = linhas.map((l) => texto(l.DatLeilao).slice(0, 10)).sort().at(-1);
     avisos.push(`Leilões: ${linhas.length} lotes no conjunto (último leilão registrado: ${ultimo ?? '?'}); ${registros.length} lotes desde ${anoMinimo}.`);
     return { registros, sinais: [], avisos, lidos: linhas.length };

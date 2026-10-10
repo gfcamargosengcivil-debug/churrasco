@@ -18,13 +18,14 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
 | Fonte | Classe | Método | Frequência | Status da integração |
 |---|---|---|---|---|
 | ANEEL — Portal de Dados Abertos (CKAN) | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
+| ANEEL — SIGET (Sistema de Gestão da Transmissão) via Dados Abertos | A | API CKAN (dados abertos) | Diária | Implementado — não validado contra o endpoint real |
 | ANEEL — SIGA (empreendimentos de geração) via Dados Abertos | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
-| ANEEL — Leilões de transmissão (editais, lotes e resultados) | A | Download de arquivo (CSV/XLSX) | Eventual (por publicação) | Importação manual |
+| ANEEL — Resultado de leilões de transmissão (lotes) via Dados Abertos | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
 | ANEEL — Resoluções Autorizativas (reforços e melhorias) | A | Documento PDF | Semanal | Adaptador preparado (requer configuração/credencial) |
 | ANEEL — Relatórios de acompanhamento/fiscalização de empreendimentos de transmissão | A | Download de arquivo (CSV/XLSX) | Mensal | Importação manual |
 | EPE — Plano Decenal de Expansão de Energia (PDE) | A | Documento PDF | Anual | Adaptador preparado (requer configuração/credencial) |
 | EPE — Programa de Expansão da Transmissão / Plano de Expansão de Longo Prazo (PET/PELP) | A | Download de arquivo (CSV/XLSX) | Anual | Importação manual |
-| EPE — WebMap (serviços ArcGIS REST de LT e SE) | A | API ArcGIS REST | Trimestral | Implementado — não validado contra o endpoint real |
+| EPE — WebMap: LT e SE da expansão planejada (ArcGIS REST) | A | API ArcGIS REST | Mensal | Implementado — não validado contra o endpoint real |
 | ONS — Portal de Dados Abertos (CKAN) | A | API CKAN (dados abertos) | Mensal | Implementado — não validado contra o endpoint real |
 | ONS — Plano de Ampliações e Reforços / Plano da Operação Elétrica (PAR/PEL) | A | Documento PDF | Anual | Adaptador preparado (requer configuração/credencial) |
 | MME — Plano de Outorgas de Transmissão (POTEE) e diretrizes | A | Download de arquivo (CSV/XLSX) | Eventual (por publicação) | Importação manual |
@@ -55,6 +56,19 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
   - Acompanhamento detalhado de obras de transmissão pode estar disponível apenas em relatórios (PDF/planilhas), não no datastore.
 - **Termos de uso:** Dados abertos governamentais; respeitar limites de requisição do portal.
 
+### ANEEL — SIGET (Sistema de Gestão da Transmissão) via Dados Abertos
+
+- **Id:** `aneel-siget` · **Órgão:** ANEEL · **Classe:** A
+- **Portal:** https://dadosabertos.aneel.gov.br/dataset/sistema-de-gestao-da-transmissao-siget
+- **Método de acesso:** API CKAN (dados abertos) (adaptador `aneel_siget`)
+- **Frequência esperada:** Diária
+- **Status:** Implementado — não validado contra o endpoint real
+- **Limitações conhecidas:**
+  - Cobre empreendimentos já outorgados (contrato de concessão ou resolução autorizativa) e reforços planejados cadastrados; não informa se a obra já foi contratada nem o estágio físico (LI, início de obras).
+  - Datas de previsão são informadas mensalmente pelas transmissoras (responsabilidade das concessionárias, segundo o dicionário de dados da ANEEL).
+  - Não traz coordenadas nem valor de investimento por empreendimento (VlrHisRct é receita do contrato, não investimento): localização e potencial dependem de outras fontes ou da referência paramétrica.
+- **Termos de uso:** Dados abertos governamentais (ANEEL).
+
 ### ANEEL — SIGA (empreendimentos de geração) via Dados Abertos
 
 - **Id:** `aneel-siga` · **Órgão:** ANEEL · **Classe:** A
@@ -67,16 +81,17 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
   - Lista usinas (não as obras de conexão): serve como sinal de demanda de LT/SE de conexão; a tensão de conexão geralmente não consta.
   - Informar resource_id e mapeamento de colunas.
 
-### ANEEL — Leilões de transmissão (editais, lotes e resultados)
+### ANEEL — Resultado de leilões de transmissão (lotes) via Dados Abertos
 
 - **Id:** `aneel-leiloes-transmissao` · **Órgão:** ANEEL · **Classe:** A
-- **Portal:** https://www.gov.br/aneel
-- **Método de acesso:** Download de arquivo (CSV/XLSX) (adaptador `planilha`)
-- **Frequência esperada:** Eventual (por publicação)
-- **Status:** Importação manual
+- **Portal:** https://dadosabertos.aneel.gov.br/dataset/resultado-de-leiloes
+- **Método de acesso:** API CKAN (dados abertos) (adaptador `aneel_leiloes_transmissao`)
+- **Frequência esperada:** Mensal
+- **Status:** Implementado — não validado contra o endpoint real
 - **Limitações conhecidas:**
-  - Editais e anexos técnicos publicados em PDF; resultados em comunicados/planilhas sem API estável.
-  - Operação: importar lotes pela planilha modelo (CSV/XLSX) ou enviar o edital/anexo para extração documental assistida (revisão obrigatória).
+  - O conjunto traz lotes já leiloados (resultado); editais e lotes de leilões futuros continuam por importação de planilha/documento.
+  - A data de assinatura do contrato não consta do conjunto: a energização é estimada (leilão + premissa + prazo do edital) e rotulada como estimativa.
+  - Coleta lotes dos últimos 5 anos (configurável); lotes antigos já estão, em geral, em operação.
 
 ### ANEEL — Resoluções Autorizativas (reforços e melhorias)
 
@@ -121,17 +136,18 @@ A data da última coleta de cada fonte fica registrada na tela **Fontes e ingest
 - **Limitações conhecidas:**
   - Quando houver planilha anexa, importar com mapeamento de colunas; caso contrário, extração documental.
 
-### EPE — WebMap (serviços ArcGIS REST de LT e SE)
+### EPE — WebMap: LT e SE da expansão planejada (ArcGIS REST)
 
 - **Id:** `epe-webmap` · **Órgão:** EPE · **Classe:** A
-- **Portal:** https://gisepe.epe.gov.br
-- **Método de acesso:** API ArcGIS REST (adaptador `arcgis`)
-- **Frequência esperada:** Trimestral
-- **Status:** Implementado — não validado contra o endpoint real — desativada até configuração
+- **Portal:** https://gisepeprd2.epe.gov.br/arcgis/rest/services/SMA/WMS_Webmap_EPE/MapServer
+- **Método de acesso:** API ArcGIS REST (adaptador `epe_webmap`)
+- **Frequência esperada:** Mensal
+- **Status:** Implementado — não validado contra o endpoint real
 - **Limitações conhecidas:**
-  - Endpoint não validado contra o serviço real: o ambiente de desenvolvimento não tinha acesso de rede a este domínio. Validar na implantação (Fontes → Testar conexão).
-  - Informar a URL do serviço/camada (planejadas ou existentes) após conferência no portal.
-  - Geometrias de planejamento são indicativas: registradas como traçado "aproximado_digitalizado", nunca como traçado executivo.
+  - Geometrias de planejamento são indicativas: traçados registrados como "aproximado_digitalizado" e SEs com localização "aproximada", nunca como traçado executivo.
+  - O ano previsto de entrada em operação tem precisão anual (registrado como 31/12); parte das feições não informa ano.
+  - Itens planejados podem já ter sido leiloados/autorizados: a deduplicação os associa aos registros da ANEEL quando os nomes coincidem.
+  - O serviço da EPE já teve indisponibilidades; falhas de coleta ficam registradas e os dados anteriores são mantidos.
 
 ### ONS — Portal de Dados Abertos (CKAN)
 

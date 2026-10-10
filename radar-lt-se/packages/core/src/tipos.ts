@@ -213,6 +213,8 @@ export const IdentificadorSchema = z.object({
     'aneel_leilao_lote', 'aneel_rea', 'aneel_contrato_concessao', 'aneel_ceg', 'epe_pet',
     'ons_par', 'mme_potee', 'licenca_ambiental', 'processo_ambiental', 'cnpj_spe', 'interno', 'outro',
     'aneel_siget_empreendimento', 'ons_empreendimento',
+    /** Chave do registro na fonte de origem ("fonteId|chave"): reconhece o mesmo item em coletas seguintes. */
+    'chave_fonte',
   ]),
   valor: z.string().min(1),
   evidenciaId: z.string().optional(),

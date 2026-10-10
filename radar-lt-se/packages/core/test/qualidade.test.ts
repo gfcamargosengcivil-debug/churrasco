@@ -34,6 +34,22 @@ describe('deduplicação', () => {
     expect(d.acao).toBe('vincular');
   });
 
+  it('identificador compartilhado (contrato/REA) não decide sozinho; exclusivos distintos separam', () => {
+    const reforco = projeto({
+      nomeOficial: 'Reforço na SE Gama: 3º ATF 500/230 kV',
+      identificadores: [{ tipo: 'aneel_siget_empreendimento', valor: '100' }, { tipo: 'aneel_contrato_concessao', valor: '004/2007' }, { tipo: 'aneel_rea', valor: 'REA-1' }],
+      localizacao: { ufs: ['SP'], municipios: [] },
+    });
+    const outro = registro({ nome: 'Reforço na SE Delta: novo reator 500 kV', ufs: ['SP'], identificadores: [{ tipo: 'aneel_contrato_concessao', valor: '004/2007' }, { tipo: 'aneel_rea', valor: 'REA-1' }] });
+    expect(decidirCorrespondencia(outro, [reforco], orgs).acao).toBe('novo');
+    const irmao = registro({ nome: 'Reforço na SE Gama: 3º ATF 500/230 kV', ufs: ['SP'], identificadores: [{ tipo: 'aneel_siget_empreendimento', valor: '101' }, { tipo: 'aneel_contrato_concessao', valor: '004/2007' }] });
+    const d = decidirCorrespondencia(irmao, [reforco], orgs);
+    expect(d.acao).toBe('novo');
+    expect(d.candidatos[0]?.motivos[0] ?? 'Identificadores oficiais distintos').toContain('distintos');
+    const mesmo = registro({ nome: 'qualquer', identificadores: [{ tipo: 'chave_fonte', valor: 'siget|100' }, { tipo: 'aneel_siget_empreendimento', valor: '100' }] });
+    expect(decidirCorrespondencia(mesmo, [reforco], orgs).acao).toBe('vincular');
+  });
+
   it('nome + UF + tensão + empreendedor vinculam automaticamente', () => {
     const d = decidirCorrespondencia(
       registro({ nome: 'Linha de Transmissão Beta - Alfa', tensoesKv: [500], ufs: ['BA'], extensaoKm: 205, organizacoes: [{ nome: 'TRANSMISSORA EXEMPLO SA', papel: 'concessionaria' }] }),

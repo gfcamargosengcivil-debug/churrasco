@@ -44,7 +44,8 @@ const coletas: { fonteId: string; fonte: string; status: string; registrosLidos:
 for (const fonteId of coletar) {
   const inicio = Date.now();
   try {
-    const c = await ingestao.executarFonte(fonteId, 'agendado', 'publicacao');
+    // Publicação automática não tem revisor: correspondências incertas viram registros novos (sinalizados).
+    const c = await ingestao.executarFonte(fonteId, 'agendado', 'publicacao', { semRevisaoManual: true });
     const fonte = (await repo.listarFontes()).find((f) => f.id === fonteId);
     coletas.push({ fonteId, fonte: fonte?.nome ?? fonteId, status: c.status, registrosLidos: c.registrosLidos, criados: c.criados, atualizados: c.atualizados, erros: c.erros, avisos: c.avisos });
     console.log(`[coleta] ${fonteId}: ${c.status} — lidos ${c.registrosLidos}, criados ${c.criados}, atualizados ${c.atualizados}, revisão ${c.paraRevisao}, conflitos ${c.conflitos}, descartados ${c.descartados} (${Math.round((Date.now() - inicio) / 1000)} s)`);
